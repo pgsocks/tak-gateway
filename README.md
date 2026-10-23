@@ -1,19 +1,35 @@
-This Git template is a starting point for native libraries with
-C11-compatible public C interfaces, procedural C++17 implementations, and
-procedural C++ headers. It is intended for maintainers who want explicit
-ownership, status-based error reporting, documented contracts, and behavior
-driven development. [CONTRIBUTING.md](CONTRIBUTING.md) defines the implementation
-restrictions and contributor workflow.
+# TAK Gateway
 
-The template provides build, test, and CI infrastructure. Product code, unit
-cases, and acceptance scenarios start empty. Enabled product suites fail until
-you add coverage; separate infrastructure regressions verify the test runner.
+TAK Gateway is a receive-oriented native gateway that aggregates
+independent TAK Server TLS streams and UDP/multicast sources into complete XML
+CoT events for TCP, UDP, and platform named-pipe consumers.
 
-# Quickstart
+The procedural C++17 implementation exposes C11 and C++17 headers and a
+foreground `tak-gateway` executable. Native and Cucumber suites exercise the
+public contracts. Live Docker checks against official TAK Server
+5.7-RELEASE-14 verify REST-created mission notifications through both XML/TLS
+and negotiated Protobuf v1 ingress to framed XML output. Native Windows
+behavior has not been verified.
 
-Install CMake 3.24 or newer, Git, and a C/C++ toolchain with C++17 support.
-Initial dependency downloads require network access. Run these commands from
-the repository root to configure and build the default unit suite:
+The full contract includes XML preservation, TAK v1 Protobuf conversion with
+explicit opaque-preservation/rejection policy, authenticated sessions and
+negotiation, bounded independent output queues, and visible delivery failures.
+Delivery is live and best effort, with duplicates retained and no durable replay.
+
+## Design and contracts
+
+- [Design rationale](docs/design.md): architecture, alternatives, and tradeoffs.
+- [Public API and configuration](docs/api.md): C11/procedural C++17 contracts,
+  lifecycle, TOML schema, and status snapshots.
+- [Research](docs/research.md): pinned protocol, codec, and server evidence.
+- [Testing](docs/testing.md): build selections, product suites, and infrastructure.
+- [TAK Server harness](tests/tak_server/README.md): source build, verified mTLS
+  REST-to-CoT smoke test, and optional gateway output verification.
+
+## Build and run contract tests
+
+Use CMake 3.24 or newer and a C/C++ toolchain supporting C11 and C++17.
+Initial CPM dependency downloads need network access:
 
 ```sh
 cmake --preset default
@@ -21,15 +37,27 @@ cmake --build --preset default
 ctest --preset default
 ```
 
-The build should succeed. In the unchanged template, CTest intentionally fails
-with `Unit suite contains no cases`. Add public API tests to make this suite
-pass. Ruby and Bundler are unnecessary for this configuration.
+The build checks both header language interfaces and runs the native tests.
+OpenSSL, c-ares, Expat, TOML parsing, and the CoT codec are acquired through
+CPM. Building OpenSSL from source requires Perl and Make (nmake on Windows).
+For a local build, `TG_USE_SYSTEM_OPENSSL=ON` selects an installed OpenSSL 3;
+put environment-specific settings in ignored `CMakeUserPresets.json`.
 
-Acceptance testing is optional. Install Ruby, Bundler, and `patch` before
-running the following commands from the repository root:
+Run the foreground gateway with a configuration matching
+[the TOML schema](docs/api.md):
 
 ```sh
-gem install bundler
+build/src/tak-gateway validate --config gateway.toml
+build/src/tak-gateway redact --config gateway.toml
+build/src/tak-gateway run --config gateway.toml
+```
+
+`redact` prints explicit defaults with secret references removed. SIGINT or
+SIGTERM stops intake and permits a two-second drain before exit.
+
+Acceptance testing also needs Ruby, Bundler, and `patch`:
+
+```sh
 bundle install
 cmake --preset acceptance
 cmake --build --preset acceptance
@@ -37,51 +65,41 @@ ctest --preset acceptance -L infrastructure
 ctest --preset acceptance -L '^(unit|acceptance)$'
 ```
 
-Infrastructure regressions should pass. Product suites intentionally fail
-with no unit cases and no selected acceptance scenarios. Infrastructure
-fixtures do not count as product coverage. See the [testing guide](docs/testing.md)
-for prerequisites, focused runs, opt-out presets, and troubleshooting.
+Runner infrastructure and populated product suites must pass. Native Cucumber
+steps call the same public library used by the executable.
 
-Test dependencies are excluded from installation. There is no product to
-install yet. After adding installable targets, use `cmake --install build`
-for the default build; the shared installation prefix is `$HOME/.local`.
-CMake has no install presets.
+## Docker TAK Server harness
 
-# Start a project
+On native Linux with Docker Engine, Compose v2, BuildKit, and Python 3.9+:
 
-Use this checklist when creating a repository from the template:
+```sh
+python3 -m unittest discover -s tests/tak_server -p 'test_*.py'
+python3 tests/tak_server/harness.py build
+python3 tests/tak_server/harness.py run --skip-build
+```
 
-1. Choose the project name. Update `project(...)` in `CMakeLists.txt` and
-   replace this README introduction with the product's purpose, audience,
-   limitations, and quickstart.
-2. Choose supported platforms and toolchains. CI currently exercises Linux
-   with GCC and Clang, and Windows with MSVC. Other platforms are unverified.
-   Update shared configure, build, and test presets together when adding
-   supported configurations.
-3. Choose and add a license before distributing the template or derived
-   project. This template supplies no project license. Review applicable
-   upstream notices when distributing dependencies. [GitHub's licensing
-   guide][licensing] explains how to select and include a license.
-4. Write the product's [API contract](docs/api.md) and
-   [design rationale](docs/design.md). Those documents currently explain how
-   to author them; replace the guides with concrete product documentation.
-5. Add library targets and public headers, then link tests against those
-   targets. Add unit cases and meaningful acceptance scenarios through the
-   public interfaces. Keep runner fixtures separate from product coverage.
-6. Define versioning, compatibility commitments, and release checks. Update
-   the documentation when these decisions change, and verify the project's
-   quickstart from its declared prerequisites.
+The harness builds pinned official TAK Server source, provisions isolated
+PostGIS and fresh test PKI, creates a mission through verified mTLS REST, and
+checks the resulting CoT notification on an authenticated XML/TLS subscription.
+It removes its own mission and disposable fixture resources afterward.
 
-# Documentation
+Verify the gateway's TCP records using either ingress encoding:
 
-Keep essential contracts, research, and design rationale in the repository so
-contributors can understand both intended behavior and the reasons for it.
+```sh
+python3 tests/tak_server/harness.py run --skip-build \
+  --gateway "$PWD/build/src/tak-gateway"
+python3 tests/tak_server/harness.py run --skip-build \
+  --gateway "$PWD/build/src/tak-gateway" --gateway-protocol protobuf
+```
 
-- [Writing an API contract](docs/api.md)
-- [Recording design rationale](docs/design.md)
-- [Testing](docs/testing.md)
+See the harness guide for persistent fixtures, provenance, trust configuration,
+and cleanup.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for code style, commit guidelines, and
-dependency policy.
+## Contributing
 
-[licensing]: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository
+Follow [CONTRIBUTING.md](CONTRIBUTING.md). Library sources use procedural
+C++17 with C11-compatible public C interfaces; ownership and errors are explicit.
+Test tooling may use the test frameworks' C++ conventions. No stable binary ABI
+or released interoperability commitment is established. This repository has
+not selected a project license; review applicable upstream notices before
+redistribution.

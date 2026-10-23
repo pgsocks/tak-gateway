@@ -76,6 +76,13 @@ jobs:
         with:
           arch: x64
 
+      - name: Select native Perl for OpenSSL on Windows
+        if: runner.os == 'Windows'
+        run: |
+          $perl = 'C:\Strawberry\perl\bin\perl.exe'
+          if (!(Test-Path $perl)) { throw 'Native Strawberry Perl is required' }
+          "CI_PERL_EXECUTABLE=$perl" >> $env:GITHUB_ENV
+
       - name: Cache CPM dependency sources
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
@@ -115,6 +122,10 @@ jobs:
                 "execution" => { "noTestsAction" => "error" }
               }]
             }
+            if ENV["CI_PERL_EXECUTABLE"]
+              presets["configurePresets"][0]["cacheVariables"]["PERL_EXECUTABLE"] =
+                ENV.fetch("CI_PERL_EXECUTABLE").tr("\\", "/")
+            end
             File.write("CMakeUserPresets.json",
               JSON.pretty_generate(presets) + "\n")
           '

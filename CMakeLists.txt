@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(native_repo_template LANGUAGES C CXX)
+project(tak_gateway LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -11,6 +11,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include(CTest)
 option(BUILD_UNIT_TESTS "Build GoogleTest unit tests" ON)
 option(BUILD_ACCEPTANCE_TESTS "Build Cucumber acceptance tests" OFF)
+
+include(cmake/CPM.cmake)
+add_subdirectory(cmake/dependencies/gateway-codec)
+add_subdirectory(cmake/dependencies/tomlc99)
+add_subdirectory(cmake/dependencies/openssl)
+add_subdirectory(cmake/dependencies/cares)
 
 add_subdirectory(src)
 

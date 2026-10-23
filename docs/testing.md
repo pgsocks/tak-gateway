@@ -2,13 +2,50 @@
 
 GoogleTest checks public API contracts. Cucumber describes observable behavior
 and workflows in Gherkin, with Cucumber-Cpp steps calling the public software
-interfaces. The initial template contains zero unit cases and zero acceptance
-scenarios, so enabled product suites intentionally fail. Separate infrastructure
-regressions verify runner behavior; their fixtures do not establish product
-coverage. Add product tests to make enabled suites pass, or explicitly disable
-the suites that the project does not use.
+interfaces. Populated native and acceptance suites exercise the gateway library.
+Separate infrastructure regressions verify runner behavior. All must pass.
+
+The build also compiles the public headers as C11 and procedural C++17.
+The [official TAK Server harness](../tests/tak_server/README.md) has independent
+Python standard-library tests and opt-in live REST-to-XML/TLS verification:
+
+```sh
+python3 -m unittest discover -s tests/tak_server -p 'test_*.py'
+python3 tests/tak_server/harness.py build
+python3 tests/tak_server/harness.py run --skip-build
+```
+
+The live smoke test uses the real source-built server and a reference TLS
+subscriber. Gateway mode requires a supplied working executable. Offline
+harness tests, source builds and reference-subscriber success do not establish
+live gateway interoperability. Network, TLS identity, multicast, FIFO and
+shutdown tests require their real OS prerequisites; do not replace failures
+with simulated success. Native Windows pipe behavior remains a platform
+verification obligation in the full design.
 
 ## Placement and maintenance
+
+Current contract coverage is grouped by public behavior:
+
+| Area | Unit coverage | Cucumber workflow |
+| --- | --- | --- |
+| Framing/datagrams | Split points, coalescing, UTF-8, unsafe XML, limits, EOF | Complete event framing |
+| Normalization | Exact XML, controls plus events, opaque recovery, conflicts | Loss-aware XML normalization |
+| Sessions | Credentials, upgrade boundaries, deadlines, reset, maintenance | Independent TAK session state |
+| Delivery | Order, duplicates, short writes, retention, per-output failure | Bounded independent output delivery |
+| Configuration | Schema, references, redaction, ownership, diagnostics | Validation before connecting |
+| Runtime adapters | Actual UDP/TCP sockets, POSIX FIFO, Linux multicast | Local network pipeline and lifecycle |
+
+The native suite covers parsing, conversion, ownership, queues, configuration,
+and real UDP/TCP/FIFO/Linux multicast adapters. The Docker harness verifies
+REST mission creation through both XML/TLS and negotiated Protobuf v1 ingress
+to the executable's framed XML output. Select the latter using
+`--gateway-protocol protobuf` together with `--gateway`.
+
+Additional platform/deployment checks remain: streaming-password authorization
+against a configured server, simultaneous real TLS sources, IPv6 multicast,
+native Windows named-pipe ACL/I/O, and supervised/read-only-container deployment.
+Do not infer these results from the mission smoke tests.
 
 Put unit test sources under `tests/unit/`. Cover normal results, contract
 boundaries, invalid inputs where specified, error results, and ownership or
@@ -190,11 +227,8 @@ ctest --preset acceptance -L infrastructure
 ctest --preset acceptance -L '^(unit|acceptance)$'
 ```
 
-The first command should pass in the unchanged template. The second intentionally
-fails because the product suites are empty. Running `ctest --preset acceptance`
-executes both groups and reports the same expected product failures. CI runs
-infrastructure checks first, then the product suites, for each compiler entry.
-The overall CI result remains failing until enabled product suites have coverage.
+Both commands must pass. Running `ctest --preset acceptance` executes all
+groups. CI runs infrastructure first, then product suites for each compiler.
 
 Fixtures under `tests/infrastructure/` exercise real native wire steps and
 controlled startup, exit, and process-tree behavior. The harness also checks
@@ -261,7 +295,8 @@ PRIVATE ...)` in `tests/unit/CMakeLists.txt`, or with
 `target_sources(acceptance_steps PRIVATE ...)` in
 `tests/acceptance/CMakeLists.txt`. Rebuild to discover new unit cases. Gherkin
 files need no CMake registration: Cucumber finds them under `features/` or
-through a focused path. No example product cases or scenarios are supplied.
+through a focused path. Shared contract fixtures are not a substitute for
+independent expected results or actual platform fixtures.
 
 As software targets are added under `src/`, link the software under test with
 `target_link_libraries(unit_tests PRIVATE your_library)` and
