@@ -38,7 +38,7 @@ ctest --preset default
 ```
 
 The build checks both header language interfaces and runs the native tests.
-OpenSSL, c-ares, Expat, TOML parsing, and the CoT codec are acquired through
+OpenSSL, c-ares, Expat, miniz, TOML parsing, and the CoT codec are acquired through
 CPM. Building OpenSSL from source requires Perl and Make (nmake on Windows).
 For a local build, `TG_USE_SYSTEM_OPENSSL=ON` selects an installed OpenSSL 3;
 put environment-specific settings in ignored `CMakeUserPresets.json`.
@@ -58,45 +58,20 @@ steps call the same public library used by the executable.
 
 ## Authenticate with one TAK Server
 
-After [building](#build-and-run-contract-tests), obtain the streaming endpoint,
-trusted CA, and authorized client certificate/key from your server administrator.
-Confirm the endpoint supports XML; `8089` below is an example streaming port.
-Save this as `gateway.toml`, replacing the hostname and credential paths:
-
-```toml
-version = 1
-
-[process]
-status_file = "status.json"
-
-[[inputs]]
-id = "tak"
-kind = "tls"
-host = "tak.example.com"
-port = 8089
-uid = "gateway-reader"
-protocol = "xml-only"
-
-[inputs.tls]
-ca_file = "credentials/ca.pem"
-cert_file = "credentials/client.pem"
-key_file = "credentials/client.key"
-
-[[outputs]]
-id = "local"
-kind = "tcp"
-bind = "127.0.0.1"
-port = 9000
-framing = "u32be"
-```
-
-Paths resolve relative to `gateway.toml`. On POSIX, use `chmod 600` for private
-keys, bundles, and password files. Validate local files/settings, then run:
+After [building](#build-and-run-contract-tests), import an administrator-provided
+ATAK package and choose a local output directly on the command line:
 
 ```sh
-build/src/tak-gateway validate --config gateway.toml
-build/src/tak-gateway run --config gateway.toml
+build/src/tak-gateway run --import-zip server-package.zip \
+  --output local=tcp://127.0.0.1:9000 --status-file status.json
 ```
+
+No TOML file is required. Use `validate` with the same arguments to check local
+settings without connecting, or `redact` to inspect the resolved settings
+without secret references. Repeat `--output` for additional consumers. See
+[CLI arguments](docs/cli.md) for output types, settings and TOML overrides, and
+[ATAK packages](docs/atak-import.md) for the uploaded ZIP's structure and live
+connection results.
 
 In another terminal, inspect `status.json`: look for `XML_ACTIVE`, then confirm
 `events_received` increases when the server sends an event authorized for your
@@ -105,23 +80,38 @@ server acceptance; `credentials_sent=false` is normal for certificate-only
 authentication. For `BACKOFF`, inspect `failure` and `reconnects`; check the
 endpoint, CA, certificate hostname, credentials, and server permissions.
 
-For an encrypted PEM key, add `key_password_file = "credentials/key-password"`
-under `[inputs.tls]`. To use PKCS#12 instead, replace that entire table with:
+For separate PEM credentials, configure the TLS input through `--set`:
 
-```toml
-[inputs.tls]
-ca_file = "credentials/ca.pem"
-pkcs12_file = "credentials/client.p12"
-pkcs12_password_file = "credentials/bundle-password"
+```sh
+build/src/tak-gateway run \
+  --set 'inputs[0].id="tak"' --set 'inputs[0].kind="tls"' \
+  --set 'inputs[0].host="tak.example.com"' --set 'inputs[0].port=8089' \
+  --set 'inputs[0].uid="gateway-reader"' \
+  --set 'inputs[0].protocol="xml-only"' \
+  --set 'inputs[0].tls.ca_file="credentials/ca.pem"' \
+  --set 'inputs[0].tls.cert_file="credentials/client.pem"' \
+  --set 'inputs[0].tls.key_file="credentials/client.key"' \
+  --output local=tcp://127.0.0.1:9000 --status-file status.json
 ```
 
-If the server also requires streaming username/password authentication, add:
+Confirm the endpoint supports XML; `8089` is an example port. Paths resolve
+from the working directory when no TOML file is supplied. On POSIX, protect
+private keys, bundles and password files with `chmod 600`. For an encrypted key,
+append `--set 'inputs[0].tls.key_password_file="credentials/key-password"'`.
+To use PKCS#12, replace the three PEM settings above with:
 
-```toml
-[inputs.auth]
-mode = "password"
-username = "reader"
-password_file = "credentials/password"
+```sh
+--set 'inputs[0].tls.ca_file="credentials/ca.pem"' \
+--set 'inputs[0].tls.pkcs12_file="credentials/client.p12"' \
+--set 'inputs[0].tls.pkcs12_password_file="credentials/bundle-password"'
+```
+
+For streaming username/password authentication, append:
+
+```sh
+--set 'inputs[0].auth.mode="password"' \
+--set 'inputs[0].auth.username="reader"' \
+--set 'inputs[0].auth.password_file="credentials/password"'
 ```
 
 Passwords belong in the referenced files. Streaming credentials are separate
@@ -130,8 +120,7 @@ remains [unverified](docs/testing.md#placement-and-maintenance).
 See the [API reference](docs/api.md#version-1-configuration-schema) for
 environment-variable alternatives and TLS `server_name` overrides, and the
 [output framing contract](docs/api.md#delivery-and-stream-boundaries) for reading
-TCP records. `build/src/tak-gateway redact --config gateway.toml` prints defaults
-without secret references. Ctrl-C stops intake and allows a two-second drain.
+TCP records. Ctrl-C stops intake and allows a two-second drain.
 
 For a local TAK Server and gateway stack, see the
 [Docker Compose quickstart](docker/README.md).
