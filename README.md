@@ -133,7 +133,7 @@ environment-variable alternatives and TLS `server_name` overrides, and the
 TCP records. `build/src/tak-gateway redact --config gateway.toml` prints defaults
 without secret references. Ctrl-C stops intake and allows a two-second drain.
 
-To run the gateway in a container, see the
+For a local TAK Server and gateway stack, see the
 [Docker Compose quickstart](docker/README.md).
 
 ## Docker TAK Server harness
