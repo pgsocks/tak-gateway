@@ -1,10 +1,10 @@
 # The upstream cucumber-cpp library supplies the native wire-server main.
 add_executable(acceptance_steps
-	steps.cpp runtime_steps.cpp import_steps.cpp cli_steps.cpp
+	steps.cpp runtime_steps.cpp import_steps.cpp cli_steps.cpp web_steps.cpp
 )
 target_link_libraries(acceptance_steps PRIVATE
 	tak_gateway cucumber-cpp GTest::gtest gateway_import_zip
-	gateway_toml OpenSSL::Crypto
+	gateway_toml OpenSSL::Crypto gateway_web yyjson
 )
 if(WIN32)
 	target_link_libraries(acceptance_steps PRIVATE ws2_32)

@@ -525,9 +525,21 @@ def managed_gateway(binary, path, state, protocol="xml"):
     config = gateway_config(path, state, port, protocol)
     (path / 'gateway-status.json').unlink(missing_ok=True)
     # Logs may contain payloads or secrets from an unfinished gateway: private.
-    with open(path / 'gateway.log', 'wb') as logs:
+    with tempfile.TemporaryDirectory(prefix='gateway-state-', dir=path) as saved, \
+            open(path / 'gateway.log', 'wb') as logs:
         os.chmod(path / 'gateway.log', 0o600)
-        process = subprocess.Popen([binary, 'run', '--config', str(config)],
+        try:
+            configured = subprocess.run(
+                [binary, 'config', '--state-dir', saved, '--config', str(config)],
+                stdout=logs, stderr=logs, timeout=30, check=False)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise HarnessError('Gateway configuration failed to execute or '
+                               'timed out') from error
+        if configured.returncode:
+            raise HarnessError('Gateway configuration failed with status '
+                               f'{configured.returncode}; inspect private '
+                               'gateway.log')
+        process = subprocess.Popen([binary, 'run', '--state-dir', saved],
                                    stdout=logs, stderr=logs)
         failure = None
         try:

@@ -1,6 +1,22 @@
 #ifndef TG_CLI_OPTIONS_H
 #define TG_CLI_OPTIONS_H
 #include "import_zip.h"
+#include "store.h"
+
+/* Overlay a saved gateway document (or version=1 when empty) using ordinary
+ * CLI configuration arguments. Explicit --config replaces gateway bytes.
+ * web is input/output: start with saved/default settings, preserve omitted
+ * fields, then apply file [web] values and --web-bind/--set web.* in order.
+ * --web-bind enables the UI. managed permits empty/all-disabled endpoints.
+ * In managed mode, imported IDs colliding with existing inputs are replaced
+ * with the next free atak-N ID; the matching generated UID changes with it.
+ * Existing profiles and noncolliding imported IDs keep their order/identity.
+ * Otherwise preserve configure's ownership, paths, bounds and error rules.
+ * Web settings remain unchanged on failure. Does not read/write the store.
+ */
+tg_status tg_cli_compose(tg_bytes base, int argc, const char *const *argv,
+	const char *cwd, bool managed, tg_config **out, tg_import_files **files,
+	tg_web_settings *web, tg_diagnostic *diagnostic);
 
 /*
  * Compose the foreground CLI configuration from argc option/value arguments

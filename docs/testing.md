@@ -318,3 +318,24 @@ Run both suites for affected behavior and inspect the discovered test and
 scenario counts. For runner or build changes, exercise all five build
 selections, failure results, focused runs, repeated runs, missing
 prerequisites, startup failures, interrupts, and server cleanup.
+
+## Management and persistent CLI checks
+
+The native and Cucumber suites include store locking/revisions, managed idle
+configuration, endpoint continuity and real HTTP mutation/status workflows.
+Additional executable, container-entrypoint and browser checks use generated
+credentials and temporary state:
+
+```sh
+TAK_GATEWAY_BINARY=build/src/tak-gateway \
+  python3 -m unittest discover -s tests/cli -p 'test_*.py'
+python3 -m unittest discover -s tests/docker -p 'test_*.py'
+python3 tests/web/test_browser.py --gateway build/src/tak-gateway -v
+```
+
+Browser checks need Python Playwright and Chromium. They are test tooling only;
+the shipped web interface has no Node.js or browser-driver dependency. The
+browser script also exercises mock-backed validation, conflicts and safe text
+rendering; supplying `--gateway` enables real-server restart/upload workflows.
+Docker bootstrap variables are first-boot seeds, so tests must use isolated
+state directories rather than modifying an operator's saved configuration.

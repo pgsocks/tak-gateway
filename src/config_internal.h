@@ -8,6 +8,7 @@ struct config_block {
 };
 struct tg_input_config {
 	const char *id;
+	const char *name;
 	const char *kind;
 	bool enabled;
 	const char *host;
@@ -35,6 +36,7 @@ struct tg_input_config {
 };
 struct tg_output_config {
 	const char *id;
+	const char *name;
 	const char *kind;
 	bool enabled;
 	const char *mode;
@@ -48,6 +50,7 @@ struct tg_output_config {
 	tg_output_options delivery;
 };
 struct tg_config {
+	bool managed;
 	toml_table_t *table;
 	config_block *blocks;
 	char *base;

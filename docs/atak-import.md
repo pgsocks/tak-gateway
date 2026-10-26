@@ -3,22 +3,23 @@
 Import an ATAK server package and choose the gateway output directly:
 
 ```sh
-tak-gateway run --import-zip server-package.zip \
+tak-gateway config --import-zip server-package.zip \
   --output local=tcp://127.0.0.1:9000 --status-file status.json
+tak-gateway run
 ```
 
-The same arguments are available with `validate` and `redact`. No TOML file
-is required. [CLI arguments](cli.md) select additional outputs, limits, logging,
-and advanced settings. An optional `--config` file supplies base settings;
-imported inputs are appended, then CLI settings override the result.
+`config` imports and saves the package offline. The saved settings are also
+editable through the [web GUI](web.md); later runs do not need the ZIP again.
+[CLI configuration](cli.md) selects additional outputs, limits and logging.
+The optional TOML import supplies a base; ZIP inputs append and later arguments
+override the result.
 
-Import reads the package without extracting its directory tree. It converts
-certificate stores into PEM files inside a private temporary directory, which
-remains available for the process lifetime and is removed on normal exit or
-an import failure. Abrupt process termination can leave that directory behind;
-treat it as private key material. Imported streams use certificate
-authentication and XML-only CoT. Server certificates and hostnames are checked
-by the existing TLS runtime.
+The importer reads archive entries without extracting their directory tree.
+It decodes certificate stores in a private temporary directory, then the shared
+configuration store promotes referenced credentials to durable private assets.
+Temporary files and the raw upload are discarded. Persisted credentials remain
+available across restarts; treat the state directory as private key material.
+TLS server certificates and hostnames remain verified.
 
 ## Uploaded package layout
 

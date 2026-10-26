@@ -331,28 +331,26 @@ requires separate byte/file quotas, restrictive permissions, and retention.
 
 ## Configuration, diagnostics, and deployment
 
-The foreground CLI accepts output and settings arguments without a TOML file:
+The executable separates offline configuration from running:
 
 ```sh
-tak-gateway validate --import-zip server-package.zip \
-  --output local=tcp://127.0.0.1:9000
-tak-gateway redact --import-zip server-package.zip \
-  --output local=tcp://127.0.0.1:9000
-tak-gateway run --import-zip server-package.zip \
-  --output local=tcp://127.0.0.1:9000 --status-file status.json
+tak-gateway config --import-zip server-package.zip \
+  --output local=tcp://127.0.0.1:9000 --web-bind 127.0.0.1:8080
+tak-gateway validate
+tak-gateway redact
+tak-gateway run
 ```
 
-Optional versioned TOML holds endpoint collections, independent credentials,
-protocol choices, limits, and outputs. Import appends inputs, then CLI arguments
-override settings in order. `--output` replaces a matching output by ID;
-`--set` addresses any schema setting. See the [CLI contract](cli.md).
-Reject unknown keys, duplicate IDs, invalid
-ports, unsupported modes, missing secrets, impossible budgets, incompatible
-authentication/framing, and obvious ingress/output loops before opening
-network endpoints. `validate` checks configuration and secret references
-without connecting. Credentials remain explicit protected-file or environment
-references. Reload requires restart
-and can lose traffic during the gap.
+A private persistent store is shared by CLI configuration and the optional
+[web manager](web.md). An explicit TOML import supplies a gateway base; ZIP
+inputs append and subsequent setters override it in order. Running reads the
+saved snapshot instead of repeating arguments. See the [CLI contract](cli.md).
+Unknown keys, invalid modes/ports, incompatible authentication/framing and
+impossible budgets remain rejected. Managed first setup permits empty endpoint
+collections; public library parsing retains its strict requirement. The owner
+serializes live endpoint edits, preserving unrelated sockets and queues.
+Global setting changes occur offline. The Docker entrypoint seeds optional
+environment settings only for an uninitialized persistent store.
 
 Passwords and key passphrases use protected files or named environment
 references, with credential-file permission checks. Do not accept secret

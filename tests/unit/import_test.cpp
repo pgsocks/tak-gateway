@@ -69,6 +69,7 @@ TEST(ZipImport, WrappedMissionPackageProducesUsableCertificateInput)
 	const tg_input_config &input = config.value->inputs[0];
 
 	EXPECT_STREQ(input.id, "atak-0");
+	EXPECT_STREQ(input.name, "Example & test server");
 	EXPECT_STREQ(input.host, "tak.example.invalid");
 	EXPECT_EQ(input.port, 28089);
 	EXPECT_EQ(input.session.protocol, TG_PROTOCOL_XML_ONLY);
@@ -106,6 +107,75 @@ TEST(ZipImport, TransportWrapperSuppliesUniqueIdentityForEnrollmentPackage)
 
 	EXPECT_EQ(tg_runtime_create(config.value, &runtime.value, nullptr),
 		TG_OK);
+}
+
+TEST(ZipImport, RequirementsDistinguishDirectAndEnrollmentPackages)
+{
+	Package fixture;
+	Imported direct;
+	Imported wrapped;
+	bool password_auth = true;
+	bool enrollment = true;
+
+	tg_import_zip_requirements(nullptr, &password_auth, &enrollment);
+	EXPECT_FALSE(password_auth);
+	EXPECT_FALSE(enrollment);
+	tg_import_zip_requirements(nullptr, nullptr, nullptr);
+	ASSERT_TRUE(fixture.prepare());
+	ASSERT_EQ(direct.read(fixture.write(zip(fixture.entries()))), TG_OK);
+	tg_import_zip_requirements(direct.files, &password_auth, &enrollment);
+	EXPECT_FALSE(password_auth);
+	EXPECT_FALSE(enrollment);
+	ASSERT_EQ(wrapped.read(fixture.wrapped()), TG_OK);
+	tg_import_zip_requirements(wrapped.files, &password_auth, &enrollment);
+	EXPECT_TRUE(password_auth);
+	EXPECT_TRUE(enrollment);
+	Config config;
+
+	ASSERT_EQ(parse_import(wrapped, config), TG_OK);
+	EXPECT_EQ(config.value->inputs[0].username, nullptr);
+	EXPECT_EQ(config.value->inputs[0].password_file, nullptr);
+}
+
+TEST(ZipImport,
+	RequirementsIncludeGlobalEnrollmentAndIgnoreDisabledStreams)
+{
+	Package fixture;
+	Imported global;
+	Imported disabled;
+	bool password_auth = true;
+	bool enrollment = false;
+	std::string pref = preferences();
+	size_t end = pref.rfind("</preferences>");
+
+	ASSERT_NE(end, std::string::npos);
+	pref.insert(end, "<preference version='1' "
+		"name='com.atakmap.app_preferences'>" +
+		entry("enrollForCertificateWithTrust0", "true") +
+		"</preference>");
+	ASSERT_TRUE(fixture.prepare());
+	ASSERT_EQ(global.read(fixture.write(zip(fixture.entries(true, pref)))),
+		TG_OK);
+	tg_import_zip_requirements(global.files, &password_auth, &enrollment);
+	EXPECT_FALSE(password_auth);
+	EXPECT_TRUE(enrollment);
+	pref = preferences();
+	std::string count = entry("count", "1");
+	size_t start = pref.find(count);
+
+	ASSERT_NE(start, std::string::npos);
+	pref.replace(start, count.size(), entry("count", "2"));
+	end = pref.find("</preference>");
+	ASSERT_NE(end, std::string::npos);
+	pref.insert(end, entry("enabled1", "false") +
+		entry("useAuth1", "true") +
+		entry("enrollForCertificateWithTrust1", "true"));
+	std::string path = fixture.write(zip(fixture.entries(true, pref)));
+
+	ASSERT_EQ(disabled.read(path), TG_OK);
+	tg_import_zip_requirements(disabled.files, &password_auth, &enrollment);
+	EXPECT_FALSE(password_auth);
+	EXPECT_FALSE(enrollment);
 }
 
 TEST(ZipImport, LegacyPkcs12EncryptionImportsWithoutGlobalProviderChanges)
@@ -154,6 +224,129 @@ TEST(ZipImport, ExplicitEmptyClientPasswordDoesNotUseTheCaPassword)
 
 	EXPECT_EQ(tg_runtime_create(config.value, &runtime.value, nullptr),
 		TG_OK);
+}
+
+TEST(ZipImport, ManualLegacyIdentityDecodesToMatchingPemWithoutProviders)
+{
+	Package fixture;
+	Buffer certificates;
+	Buffer private_key;
+	tg_diagnostic diagnostic{};
+	EVP_CIPHER *before = EVP_CIPHER_fetch(nullptr, "RC2-40-CBC", nullptr);
+	bool available_before = before != nullptr;
+
+	EVP_CIPHER_free(before);
+	ERR_clear_error();
+	ASSERT_TRUE(fixture.prepare(true));
+	ASSERT_EQ(tg_import_pkcs12_identity(view(fixture.client),
+		"test-only-secret", &certificates.value, &private_key.value,
+		&diagnostic), TG_OK);
+	EXPECT_EQ(diagnostic.status, TG_OK);
+	BIO *cert_bio = BIO_new_mem_buf(certificates.value.data,
+		(int)certificates.value.size);
+	BIO *key_bio = BIO_new_mem_buf(private_key.value.data,
+		(int)private_key.value.size);
+	X509 *certificate = PEM_read_bio_X509(cert_bio, nullptr, nullptr,
+		nullptr);
+	EVP_PKEY *key = PEM_read_bio_PrivateKey(key_bio, nullptr, nullptr,
+		nullptr);
+
+	ASSERT_NE(certificate, nullptr);
+	ASSERT_NE(key, nullptr);
+	EXPECT_EQ(X509_check_private_key(certificate, key), 1);
+	EXPECT_NE(string(certificates.value).find("BEGIN CERTIFICATE"),
+		std::string::npos);
+	EXPECT_EQ(string(certificates.value).find("PRIVATE KEY"),
+		std::string::npos);
+	EVP_PKEY_free(key);
+	X509_free(certificate);
+	BIO_free(cert_bio);
+	BIO_free(key_bio);
+	OPENSSL_cleanse(private_key.value.data, private_key.value.size);
+	EVP_CIPHER *after = EVP_CIPHER_fetch(nullptr, "RC2-40-CBC", nullptr);
+
+	EXPECT_EQ(after != nullptr, available_before);
+	EVP_CIPHER_free(after);
+	ERR_clear_error();
+}
+
+TEST(ZipImport, ManualIdentitySupportsModernStoresAndEmptyPassword)
+{
+	Package fixture;
+	Buffer certificates;
+	Buffer private_key;
+
+	ASSERT_TRUE(fixture.prepare(false, ""));
+	ASSERT_EQ(tg_import_pkcs12_identity(view(fixture.client), nullptr,
+		&certificates.value, &private_key.value, nullptr), TG_OK);
+	EXPECT_NE(string(private_key.value).find("PRIVATE KEY"),
+		std::string::npos);
+	OPENSSL_cleanse(private_key.value.data, private_key.value.size);
+}
+
+TEST(ZipImport, ManualIdentityFailurePublishesNeitherPemBuffer)
+{
+	Package fixture;
+	Buffer certificates;
+	Buffer private_key;
+	tg_diagnostic diagnostic{};
+
+	ASSERT_TRUE(fixture.prepare());
+	for (const auto &data : {fixture.client, fixture.trust,
+		     Bytes{0, 1, 2, 3}}) {
+		EXPECT_LT(tg_import_pkcs12_identity(view(data), "wrong-secret",
+			&certificates.value, &private_key.value, &diagnostic),
+			TG_OK);
+		EXPECT_EQ(certificates.value.data, nullptr);
+		EXPECT_EQ(private_key.value.data, nullptr);
+		EXPECT_EQ(std::string(diagnostic.key).find("wrong-secret"),
+			std::string::npos);
+	}
+	EXPECT_LT(tg_import_pkcs12_identity(view(fixture.trust),
+		"test-only-secret", &certificates.value, &private_key.value,
+		&diagnostic), TG_OK);
+	EXPECT_EQ(certificates.value.data, nullptr);
+	EXPECT_EQ(private_key.value.data, nullptr);
+}
+
+TEST(ZipImport, ManualIdentityKeepsMacAndWorkLimitRequirements)
+{
+	for (int iterations : {-1, 1000001}) {
+		Package fixture;
+		Buffer certificates;
+		Buffer private_key;
+
+		ASSERT_TRUE(fixture.prepare(false, "test-only-secret",
+			iterations));
+		EXPECT_LT(tg_import_pkcs12_identity(view(fixture.client),
+			"test-only-secret", &certificates.value,
+			&private_key.value, nullptr), TG_OK);
+		EXPECT_EQ(certificates.value.data, nullptr);
+		EXPECT_EQ(private_key.value.data, nullptr);
+	}
+}
+
+TEST(ZipImport, ManualIdentityRejectsInvalidArgumentsWithoutOwnershipChanges)
+{
+	Buffer certificates;
+	Buffer private_key;
+	Bytes bytes{1};
+
+	EXPECT_EQ(tg_import_pkcs12_identity(view(bytes), "",
+		&certificates.value, &certificates.value, nullptr), TG_INVALID);
+	EXPECT_EQ(tg_import_pkcs12_identity({}, "", &certificates.value,
+		&private_key.value, nullptr), TG_INVALID);
+	EXPECT_EQ(tg_import_pkcs12_identity(view(bytes), "", nullptr,
+		&private_key.value, nullptr), TG_INVALID);
+	bytes.resize(8 * 1024 * 1024 + 1);
+	EXPECT_EQ(tg_import_pkcs12_identity(view(bytes), "",
+		&certificates.value, &private_key.value, nullptr), TG_LIMIT);
+	ASSERT_EQ(tg_copy(view(std::string("owned")), &certificates.value),
+		TG_OK);
+	EXPECT_EQ(tg_import_pkcs12_identity(view(bytes), "",
+		&certificates.value, &private_key.value, nullptr), TG_INVALID);
+	EXPECT_EQ(string(certificates.value), "owned");
+	EXPECT_EQ(private_key.value.data, nullptr);
 }
 
 TEST(ZipImport, GlobalCertificatePreferencesSupplyConnectionDefaults)

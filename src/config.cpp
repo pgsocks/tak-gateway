@@ -1,4 +1,4 @@
-#include "config_internal.h"
+#include "managed_runtime.h"
 #include <sys/stat.h>
 #include <errno.h>
 #include <limits.h>
@@ -208,12 +208,14 @@ static void read_input(reader *r, toml_table_t *t, size_t index)
 	char p[64];
 	snprintf(p, sizeof(p), "inputs[%zu]", index);
 	if (!schema(r, t,
-		    "id kind enabled host bind port encoding group interface "
+		    "id name kind enabled host bind port encoding "
+		    "group interface "
 		    "allow_peers protocol prefer version uid callsign tls auth "
 		    "maintenance",
 		    p))
 		return;
 	in->id = string_in(r, t, "id", p);
+	in->name = string_in(r, t, "name", p, in->id);
 	in->kind = string_in(r, t, "kind", p);
 	in->enabled = boolean_in(r, t, "enabled", p, true);
 	if (!in->id)
@@ -379,12 +381,14 @@ static void read_output(reader *r, toml_table_t *t, size_t index)
 	char p[64];
 	snprintf(p, sizeof(p), "outputs[%zu]", index);
 	if (!schema(r, t,
-		    "id kind enabled mode host bind port framing max_clients "
+		    "id name kind enabled mode host bind port framing "
+		    "max_clients "
 		    "max_datagram_bytes path create permissions queue_bytes "
 		    "queue_records",
 		    p))
 		return;
 	o->id = string_in(r, t, "id", p);
+	o->name = string_in(r, t, "name", p, o->id);
 	o->kind = string_in(r, t, "kind", p);
 	o->enabled = boolean_in(r, t, "enabled", p, true);
 	if (!o->id)
@@ -459,8 +463,8 @@ static void read_output(reader *r, toml_table_t *t, size_t index)
 	if (!equal(o->kind, "pipe") && !o->port)
 		invalid(r, p, "port");
 }
-tg_status tg_config_parse(tg_bytes input, const char *base, tg_config **out,
-	tg_diagnostic *diagnostic)
+static tg_status config_parse(tg_bytes input, const char *base,
+	tg_config **out, tg_diagnostic *diagnostic, bool managed)
 {
 	/*
 	 * Parse strict UTF-8 TOML and validate schema, cross-field rules,
@@ -504,6 +508,7 @@ tg_status tg_config_parse(tg_bytes input, const char *base, tg_config **out,
 		}
 		return TG_MALFORMED;
 	}
+	c->managed = managed;
 	reader r{c, diagnostic, TG_OK};
 	toml_table_t *t = c->table;
 	schema(&r, t,
@@ -574,11 +579,15 @@ tg_status tg_config_parse(tg_bytes input, const char *base, tg_config **out,
 	toml_array_t *outputs = toml_array_in(t, "outputs");
 	c->input_count = inputs ? (size_t)toml_array_nelem(inputs) : 0;
 	c->output_count = outputs ? (size_t)toml_array_nelem(outputs) : 0;
-	if (!c->input_count || c->input_count > c->max_inputs ||
-		(inputs && toml_array_kind(inputs) != 't'))
+	if ((!managed && !c->input_count) ||
+		(toml_key_exists(t, "inputs") && !inputs) ||
+		c->input_count > c->max_inputs ||
+		(c->input_count && toml_array_kind(inputs) != 't'))
 		invalid(&r, "", "inputs");
-	if (!c->output_count || c->output_count > c->limits.max_outputs ||
-		(outputs && toml_array_kind(outputs) != 't'))
+	if ((!managed && !c->output_count) ||
+		(toml_key_exists(t, "outputs") && !outputs) ||
+		c->output_count > c->limits.max_outputs ||
+		(c->output_count && toml_array_kind(outputs) != 't'))
 		invalid(&r, "", "outputs");
 	if (r.status == TG_OK) {
 		c->inputs = static_cast<tg_input_config *>(
@@ -598,9 +607,9 @@ tg_status tg_config_parse(tg_bytes input, const char *base, tg_config **out,
 			read_output(&r, toml_table_at(outputs, (int)i), i);
 			enabled_output |= c->outputs[i].enabled;
 		}
-		if (!enabled_input)
+		if (!managed && !enabled_input)
 			invalid(&r, "", "inputs");
-		if (!enabled_output)
+		if (!managed && !enabled_output)
 			invalid(&r, "", "outputs");
 	}
 	if (r.status == TG_OK)
@@ -811,23 +820,28 @@ static bool secret_key(const char *key)
 	return strstr(key, "password") || equal(key, "key_file") ||
 	       equal(key, "pkcs12_file");
 }
-static bool setting(tg_vec *out, const char *key, const char *value)
+static bool setting(tg_vec *out, bool redact, const char *key,
+	const char *value)
 {
-	return !value ||
-	       emit_string(out, key, secret_key(key) ? "<redacted>" : value);
+	if (!value)
+		return true;
+	return emit_string(out, key,
+		redact && secret_key(key) ? "<redacted>" : value);
 }
-static bool serialize_input(tg_vec *out, const tg_input_config *in)
+static bool serialize_input(tg_vec *out, const tg_input_config *in,
+	bool redact)
 {
 	bool ok = tg_text(out, "\n[[inputs]]\n") &&
-		  setting(out, "id", in->id) &&
-		  setting(out, "kind", in->kind) &&
+		  setting(out, redact, "id", in->id) &&
+		  setting(out, redact, "name", in->name) &&
+		  setting(out, redact, "kind", in->kind) &&
 		  tg_printf(out, "enabled = %s\nport = %u\n",
 			  in->enabled ? "true" : "false", in->port);
 	if (!equal(in->kind, "tls")) {
-		ok = ok && setting(out, "bind", in->bind) &&
-		     setting(out, "group", in->group) &&
-		     setting(out, "interface", in->interface_name) &&
-		     setting(out, "encoding",
+		ok = ok && setting(out, redact, "bind", in->bind) &&
+		     setting(out, redact, "group", in->group) &&
+		     setting(out, redact, "interface", in->interface_name) &&
+		     setting(out, redact, "encoding",
 			     in->encoding == TG_DATAGRAM_XML	  ? "xml"
 			     : in->encoding == TG_DATAGRAM_TAK_V1 ? "tak-v1"
 								  : "auto") &&
@@ -839,10 +853,10 @@ static bool serialize_input(tg_vec *out, const tg_input_config *in)
 		return ok && tg_text(out, "]\n");
 	}
 	const tg_session_options *s = &in->session;
-	ok = ok && setting(out, "host", in->host) &&
-	     setting(out, "uid", s->uid) &&
-	     setting(out, "callsign", s->callsign) &&
-	     setting(out, "protocol",
+	ok = ok && setting(out, redact, "host", in->host) &&
+	     setting(out, redact, "uid", s->uid) &&
+	     setting(out, redact, "callsign", s->callsign) &&
+	     setting(out, redact, "protocol",
 		     s->protocol == TG_PROTOCOL_XML_ONLY ? "xml-only"
 		     : s->protocol == TG_PROTOCOL_PROTOBUF_ONLY
 			     ? "protobuf-only"
@@ -850,37 +864,42 @@ static bool serialize_input(tg_vec *out, const tg_input_config *in)
 	if (s->protocol == TG_PROTOCOL_PROTOBUF_ONLY)
 		ok = ok && tg_text(out, "version = 1\n");
 	if (s->protocol == TG_PROTOCOL_NEGOTIATED)
-		ok = ok && setting(out, "prefer",
+		ok = ok && setting(out, redact, "prefer",
 				   s->preference == TG_PREFER_XML ? "xml"
 								  : "protobuf");
 	ok = ok && tg_text(out, "\n[inputs.tls]\n") &&
-	     setting(out, "ca_file", in->ca_file) &&
-	     setting(out, "server_name", in->server_name) &&
-	     setting(out, "cert_file", in->cert_file) &&
-	     setting(out, "key_file", in->key_file) &&
-	     setting(out, "key_password_file", in->key_password_file) &&
-	     setting(out, "key_password_env", in->key_password_env) &&
-	     setting(out, "pkcs12_file", in->pkcs12_file) &&
-	     setting(out, "pkcs12_password_file", in->pkcs12_password_file) &&
-	     setting(out, "pkcs12_password_env", in->pkcs12_password_env) &&
+	     setting(out, redact, "ca_file", in->ca_file) &&
+	     setting(out, redact, "server_name", in->server_name) &&
+	     setting(out, redact, "cert_file", in->cert_file) &&
+	     setting(out, redact, "key_file", in->key_file) &&
+	     setting(out, redact, "key_password_file", in->key_password_file) &&
+	     setting(out, redact, "key_password_env", in->key_password_env) &&
+	     setting(out, redact, "pkcs12_file", in->pkcs12_file) &&
+	     setting(out, redact, "pkcs12_password_file",
+		in->pkcs12_password_file) &&
+	     setting(out, redact, "pkcs12_password_env",
+		in->pkcs12_password_env) &&
 	     tg_text(out, "\n[inputs.auth]\n") &&
-	     setting(out, "mode", in->username ? "password" : "none") &&
-	     setting(out, "username", in->username) &&
-	     setting(out, "password_file", in->password_file) &&
-	     setting(out, "password_env", in->password_env) &&
+	     setting(out, redact, "mode", in->username ? "password" : "none") &&
+	     setting(out, redact, "username", in->username) &&
+	     setting(out, redact, "password_file", in->password_file) &&
+	     setting(out, redact, "password_env", in->password_env) &&
 	     tg_printf(out,
 		     "\n[inputs.maintenance]\nping_interval_ms = %llu\n"
 		     "ping_timeout_ms = %llu\n",
 		     (unsigned long long)s->ping_interval_ms,
 		     (unsigned long long)s->ping_timeout_ms) &&
-	     setting(out, "identity_xml_file", in->identity_file);
+	     setting(out, redact, "identity_xml_file", in->identity_file);
 	return ok;
 }
 static bool serialize_output(
-	tg_vec *out, const tg_output_config *o, const tg_limits *limits)
+	tg_vec *out, const tg_output_config *o, const tg_limits *limits,
+		bool redact)
 {
 	bool ok = tg_text(out, "\n[[outputs]]\n") &&
-		  setting(out, "id", o->id) && setting(out, "kind", o->kind) &&
+		  setting(out, redact, "id", o->id) &&
+		  setting(out, redact, "name", o->name) && setting(out, redact,
+			"kind", o->kind) &&
 		  tg_printf(out,
 			  "enabled = %s\nqueue_bytes = %zu\n"
 			  "queue_records = %zu\n",
@@ -890,36 +909,39 @@ static bool serialize_output(
 			  o->delivery.queue_records ? o->delivery.queue_records
 						    : limits->queue_records);
 	if (equal(o->kind, "udp"))
-		return ok && setting(out, "host", o->host) &&
+		return ok && setting(out, redact, "host", o->host) &&
 		       tg_printf(out, "port = %u\nmax_datagram_bytes = %zu\n",
 			       o->port, o->delivery.max_datagram_bytes);
 	ok = ok &&
-	     setting(out, "framing",
+	     setting(out, redact, "framing",
 		     o->delivery.framing == TG_FRAMING_U32BE ? "u32be"
 							     : "xml-document");
 	if (equal(o->kind, "pipe"))
-		return ok && setting(out, "path", o->path) &&
+		return ok && setting(out, redact, "path", o->path) &&
 		       tg_printf(out, "create = %s\npermissions = \"0%o\"\n",
 			       o->create ? "true" : "false", o->permissions);
-	ok = ok && setting(out, "mode", o->mode) &&
+	ok = ok && setting(out, redact, "mode", o->mode) &&
 	     tg_printf(out, "port = %u\n", o->port);
 	if (equal(o->mode, "connect"))
-		return ok && setting(out, "host", o->host);
-	return ok && setting(out, "bind", o->bind) &&
+		return ok && setting(out, redact, "host", o->host);
+	return ok && setting(out, redact, "bind", o->bind) &&
 	       tg_printf(out, "max_clients = %zu\n", o->max_clients);
 }
-tg_status tg_config_redacted(
-	const tg_config *c, tg_buffer *out, tg_diagnostic *d)
+static tg_status config_serialize(const tg_config *c, tg_buffer *out,
+	tg_diagnostic *d, bool redact)
 {
 	if (d)
 		*d = {};
 	if (!c || !tg_empty(out))
 		return error(d, TG_INVALID, "config");
 	tg_vec text{};
-	bool ok = tg_text(&text, "version = 1\n\n[process]\n") &&
-		  setting(&text, "log_format", c->log_format) &&
-		  setting(&text, "log_level", c->log_level) &&
-		  setting(&text, "status_file", c->status_file) &&
+	bool ok = tg_text(&text, "version = 1\n") &&
+		  (c->input_count || tg_text(&text, "inputs = []\n")) &&
+		  (c->output_count || tg_text(&text, "outputs = []\n")) &&
+		  tg_text(&text, "\n[process]\n") &&
+		  setting(&text, redact, "log_format", c->log_format) &&
+		  setting(&text, redact, "log_level", c->log_level) &&
+		  setting(&text, redact, "status_file", c->status_file) &&
 		  tg_printf(&text,
 			  "\n[limits]\nmax_message_bytes = %zu\n"
 			  "max_xml_depth = %u\nretained_bytes = "
@@ -931,19 +953,20 @@ tg_status tg_config_redacted(
 			  c->limits.queue_records, c->max_inputs,
 			  c->limits.max_outputs) &&
 		  tg_text(&text, "\n[normalization]\n") &&
-		  setting(&text, "protobuf_extra_fields",
+		  setting(&text, redact, "protobuf_extra_fields",
 			  c->preservation == TG_PRESERVE_OPAQUE
 				  ? "preserve-opaque"
 				  : "reject") &&
-		  setting(&text, "unrepresentable_core", "reject") &&
+		  setting(&text, redact, "unrepresentable_core", "reject") &&
 		  tg_text(&text, "\n[delivery]\n") &&
-		  setting(&text, "overflow",
+		  setting(&text, redact, "overflow",
 			  c->overflow == TG_OVERFLOW_FAIL ? "fail"
 							  : "drop-newest");
 	for (size_t i = 0; ok && i < c->input_count; ++i)
-		ok = serialize_input(&text, &c->inputs[i]);
+		ok = serialize_input(&text, &c->inputs[i], redact);
 	for (size_t i = 0; ok && i < c->output_count; ++i)
-		ok = serialize_output(&text, &c->outputs[i], &c->limits);
+		ok = serialize_output(&text, &c->outputs[i], &c->limits,
+			redact);
 	if (!ok) {
 		tg_vec_free(&text);
 		return error(d, TG_NO_MEMORY, "config");
@@ -967,4 +990,29 @@ void tg_config_destroy(tg_config *c)
 		free(b);
 	}
 	free(c);
+}
+
+
+tg_status tg_config_parse(tg_bytes bytes, const char *base, tg_config **out,
+	tg_diagnostic *diagnostic)
+{
+	return config_parse(bytes, base, out, diagnostic, false);
+}
+
+tg_status tg_config_parse_managed(tg_bytes bytes, const char *base,
+	tg_config **out, tg_diagnostic *diagnostic)
+{
+	return config_parse(bytes, base, out, diagnostic, true);
+}
+
+tg_status tg_config_redacted(const tg_config *config, tg_buffer *out,
+	tg_diagnostic *diagnostic)
+{
+	return config_serialize(config, out, diagnostic, true);
+}
+
+tg_status tg_config_export(const tg_config *config, tg_buffer *out,
+	tg_diagnostic *diagnostic)
+{
+	return config_serialize(config, out, diagnostic, false);
 }

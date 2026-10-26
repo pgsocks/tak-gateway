@@ -33,6 +33,11 @@ RUN --mount=type=secret,id=proxy_ca \
       --no-install-recommends ca-certificates libstdc++6 && \
     rm -rf /var/lib/apt/lists/*
 COPY --from=build /src/build/no-tests/src/tak-gateway /usr/local/bin/tak-gateway
+COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN mkdir -p /var/lib/tak-gateway && \
+    chown 1000:1000 /var/lib/tak-gateway && \
+    chmod 700 /var/lib/tak-gateway
+ENV TAK_GATEWAY_STATE_DIR=/var/lib/tak-gateway
 USER 1000:1000
-ENTRYPOINT ["/usr/local/bin/tak-gateway"]
-CMD ["run", "--config", "/config/gateway.toml"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["run"]

@@ -18,6 +18,8 @@ add_subdirectory(cmake/dependencies/tomlc99)
 add_subdirectory(cmake/dependencies/openssl)
 add_subdirectory(cmake/dependencies/cares)
 add_subdirectory(cmake/dependencies/miniz)
+add_subdirectory(cmake/dependencies/civetweb)
+add_subdirectory(cmake/dependencies/yyjson)
 
 add_subdirectory(src)
 

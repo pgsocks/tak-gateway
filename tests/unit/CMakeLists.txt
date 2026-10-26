@@ -15,9 +15,17 @@ add_executable(unit_tests main.cpp
 	runtime_test.cpp
 	import_test.cpp
 	cli_test.cpp
+	managed_runtime_test.cpp
+	web_test.cpp
+	store_test.cpp
+	managed_cli_test.cpp
 )
 target_link_libraries(unit_tests PRIVATE
-	tak_gateway GTest::gtest gateway_import_zip gateway_toml OpenSSL::Crypto
+	tak_gateway GTest::gtest gateway_import_zip gateway_web gateway_toml
+	OpenSSL::Crypto yyjson
+)
+target_compile_definitions(unit_tests PRIVATE
+	TG_WEB_ASSET_DIRECTORY="${PROJECT_SOURCE_DIR}/src/web"
 )
 if(WIN32)
 	target_link_libraries(unit_tests PRIVATE ws2_32)

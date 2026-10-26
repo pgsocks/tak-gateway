@@ -2,8 +2,12 @@ option(TG_USE_SYSTEM_OPENSSL "Use an installed OpenSSL 3 for local builds" OFF)
 if(TG_USE_SYSTEM_OPENSSL)
 	find_package(OpenSSL 3 REQUIRED GLOBAL)
 else()
-	CPMAddPackage(NAME GatewayOpenSSL GITHUB_REPOSITORY openssl/openssl
-		GIT_TAG openssl-3.5.4 DOWNLOAD_ONLY YES)
+	# The release archive excludes recursive third-party test repositories.
+	CPMAddPackage(NAME GatewayOpenSSL
+		URL https://codeload.github.com/openssl/openssl/tar.gz/refs/tags/openssl-3.5.4
+		URL_HASH SHA256=758b69feed5787dc12d34b0eb29b60d3c9d73d5a64760c62d93a6d26b344d65d
+		DOWNLOAD_NAME openssl-3.5.4.tar.gz
+		DOWNLOAD_EXTRACT_TIMESTAMP YES DOWNLOAD_ONLY YES)
 	include(ExternalProject)
 	find_package(Threads REQUIRED)
 	find_package(Perl REQUIRED)

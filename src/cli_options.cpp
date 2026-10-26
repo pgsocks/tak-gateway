@@ -1,5 +1,6 @@
 #include "cli_options.h"
 #include "config_internal.h"
+#include "managed_runtime.h"
 #include <openssl/crypto.h>
 #ifdef _WIN32
 #include <winsock2.h>
@@ -678,8 +679,84 @@ static bool output_setting(option_tree *tree, option_node *root,
 	return true;
 }
 
+static bool input_id_used(const option_node *inputs, const char *id)
+{
+	for (const option_node *input = inputs->children; input;
+		input = input->next) {
+		if (input->kind != node_table)
+			continue;
+		for (const option_node *field = input->children; field;
+			field = field->next) {
+			if (strcmp(field->key, "id") ||
+				field->kind != node_scalar)
+				continue;
+			char *value = nullptr;
+			bool match = !toml_rtos(field->raw, &value) &&
+				!strcmp(value, id);
+
+			free(value);
+			if (match)
+				return true;
+		}
+	}
+	return false;
+}
+
+static bool fresh_import_id(option_tree *tree, option_node *inputs,
+	option_node *input)
+{
+	option_node *id = input->kind == node_table ?
+		*child_slot(input, "id") : nullptr;
+	char *old_id = nullptr;
+
+	if (!id || id->kind != node_scalar ||
+		toml_rtos(id->raw, &old_id)) {
+		tree->status = TG_INVALID;
+		return false;
+	}
+	if (!input_id_used(inputs, old_id)) {
+		free(old_id);
+		return true;
+	}
+	char candidate[64];
+	unsigned next = 0;
+
+	for (; next < 8192; ++next) {
+		snprintf(candidate, sizeof(candidate), "atak-%u", next);
+		if (!input_id_used(inputs, candidate))
+			break;
+	}
+	option_node *uid = *child_slot(input, "uid");
+	char *old_uid = nullptr;
+	bool change_uid = uid && uid->kind == node_scalar &&
+		!toml_rtos(uid->raw, &old_uid) && !strcmp(old_uid, old_id);
+	tg_vec encoded{};
+	bool ok = next < 8192 && emit_string(&encoded, candidate);
+	char *new_id = ok ? tg_strdup((const char *)encoded.data) : nullptr;
+	char *new_uid = ok && change_uid ?
+		tg_strdup((const char *)encoded.data) : nullptr;
+
+	ok = ok && new_id && (!change_uid || new_uid);
+	if (ok) {
+		free(id->raw);
+		id->raw = new_id;
+		if (change_uid) {
+			free(uid->raw);
+			uid->raw = new_uid;
+		}
+	} else {
+		free(new_id);
+		free(new_uid);
+		tree->status = next < 8192 ? TG_NO_MEMORY : TG_LIMIT;
+	}
+	free(old_id);
+	free(old_uid);
+	tg_vec_free(&encoded);
+	return ok;
+}
+
 static bool append_import(option_tree *tree, option_node *root,
-	tg_buffer imported)
+	tg_buffer imported, bool managed)
 {
 	option_node *addition = parse_tree(tree,
 		{imported.data, imported.size});
@@ -701,8 +778,20 @@ static bool append_import(option_tree *tree, option_node *root,
 
 		while (*tail)
 			tail = &(*tail)->next;
-		*tail = inputs->children;
-		inputs->children = nullptr;
+		while (ok && inputs->children) {
+			option_node *input = inputs->children;
+
+			inputs->children = input->next;
+			input->next = nullptr;
+			if (managed && !fresh_import_id(tree, *destination,
+				input)) {
+				node_free(tree, input);
+				ok = false;
+			} else {
+				*tail = input;
+				tail = &input->next;
+			}
+		}
 	}
 	node_free(tree, addition);
 	if (!ok && tree->status == TG_OK)
@@ -710,13 +799,123 @@ static bool append_import(option_tree *tree, option_node *root,
 	return ok;
 }
 
-tg_status tg_cli_configure(int argc, const char *const *argv, const char *cwd,
-	tg_config **out, tg_import_files **files, tg_diagnostic *diagnostic)
+static bool web_valid(const tg_web_settings *web)
+{
+	if (!web || !memchr(web->bind, 0, sizeof(web->bind)) ||
+		!*web->bind || strpbrk(web->bind, " /\\@?#%\r\n\t"))
+		return false;
+	char address[256];
+
+	strcpy(address, web->bind);
+	char *port = nullptr;
+
+	if (*address == '[') {
+		char *close = strchr(address, ']');
+
+		if (!close || close[1] != ':')
+			return false;
+		*close = 0;
+		port = close + 2;
+		unsigned char bytes[16];
+
+		if (inet_pton(AF_INET6, address + 1, bytes) != 1)
+			return false;
+	} else {
+		port = strchr(address, ':');
+		if (!port || port == address || strchr(port + 1, ':'))
+			return false;
+		*port++ = 0;
+	}
+	unsigned number = 0;
+
+	return valid_port(port, &number);
+}
+
+static bool web_defaults(option_tree *tree, option_node *root,
+	const tg_web_settings *web)
+{
+	option_node **slot = child_slot(root, "web");
+
+	if (!*slot)
+		*slot = node_create(tree, node_table, "web");
+	if (!*slot || (*slot)->kind != node_table) {
+		tree->status = tree->status < 0 ? tree->status : TG_INVALID;
+		return false;
+	}
+	option_node **enabled = child_slot(*slot, "enabled");
+
+	if (!*enabled)
+		*enabled = node_create(tree, node_scalar, "enabled",
+			web->enabled ? "true" : "false");
+	option_node **bind = child_slot(*slot, "bind");
+	if (!*bind) {
+		tg_vec raw{};
+
+		if (emit_string(&raw, web->bind))
+			*bind = node_create(tree, node_scalar, "bind",
+				(const char *)raw.data);
+		else
+			tree->status = TG_NO_MEMORY;
+		tg_vec_free(&raw);
+	}
+	return tree->status == TG_OK && *enabled && *bind;
+}
+
+static bool web_extract(option_tree *tree, option_node *root,
+	tg_web_settings *web)
+{
+	option_node **slot = child_slot(root, "web");
+	tg_web_settings candidate{};
+
+	tg_web_settings_default(&candidate);
+	if (!*slot || (*slot)->kind != node_table)
+		return false;
+	for (option_node *field = (*slot)->children; field;
+		field = field->next) {
+		if (field->kind != node_scalar)
+			return false;
+		if (!strcmp(field->key, "enabled")) {
+			int enabled = 0;
+
+			if (toml_rtob(field->raw, &enabled))
+				return false;
+			candidate.enabled = enabled != 0;
+		} else if (!strcmp(field->key, "bind")) {
+			char *bind = nullptr;
+
+			if (toml_rtos(field->raw, &bind))
+				return false;
+			bool valid = strlen(bind) < sizeof(candidate.bind);
+
+			if (valid)
+				strcpy(candidate.bind, bind);
+			free(bind);
+			if (!valid)
+				return false;
+		} else {
+			return false;
+		}
+	}
+	if (!web_valid(&candidate))
+		return false;
+	option_node *remove = *slot;
+
+	*slot = remove->next;
+	remove->next = nullptr;
+	node_free(tree, remove);
+	*web = candidate;
+	return true;
+}
+
+tg_status tg_cli_compose(tg_bytes saved, int argc, const char *const *argv,
+	const char *cwd, bool managed, tg_config **out, tg_import_files **files,
+	tg_web_settings *web, tg_diagnostic *diagnostic)
 {
 	if (diagnostic)
 		*diagnostic = {};
 	if (argc < 0 || argc > 1024 || argc % 2 || (argc && !argv) ||
-		!absolute_path(cwd) || !out || *out || !files || *files)
+		!absolute_path(cwd) || !out || *out || !files || *files ||
+		!tg_span(saved) || !web_valid(web))
 		return cli_error(diagnostic, TG_INVALID, "arguments");
 	const char *config_path = nullptr, *import_path = nullptr;
 	size_t argument_bytes = 0;
@@ -732,6 +931,7 @@ tg_status tg_cli_configure(int argc, const char *const *argv, const char *cwd,
 		else if (!strcmp(argv[i], "--import-zip") && !import_path)
 			import_path = argv[i + 1];
 		else if (strcmp(argv[i], "--set") &&
+			strcmp(argv[i], "--web-bind") &&
 			strcmp(argv[i], "--output") && !scalar_flag(argv[i]))
 			return cli_error(diagnostic, TG_INVALID, "arguments");
 	}
@@ -775,10 +975,13 @@ tg_status tg_cli_configure(int argc, const char *const *argv, const char *cwd,
 		const char defaults[] = "version=1\n";
 		tg_bytes text = config_path ?
 			tg_bytes{source.data, source.size} :
-			tg_bytes{(const uint8_t *)defaults, strlen(defaults)};
+			saved.size ? saved : tg_bytes{
+				(const uint8_t *)defaults, strlen(defaults)};
 
 		root = parse_tree(&tree, text);
 		status = tree.status;
+		if (status == TG_OK && !web_defaults(&tree, root, web))
+			status = tree.status;
 	}
 	tg_buffer_release(&source);
 	tg_vec_free(&path);
@@ -791,7 +994,8 @@ tg_status tg_cli_configure(int argc, const char *const *argv, const char *cwd,
 		else
 			status = tg_import_zip((const char *)path.data,
 				&imported, &imported_files, diagnostic);
-		if (status == TG_OK && !append_import(&tree, root, imported))
+		if (status == TG_OK && !append_import(&tree, root, imported,
+			managed))
 			status = tree.status;
 		tg_buffer_release(&imported);
 		tg_vec_free(&path);
@@ -800,7 +1004,28 @@ tg_status tg_cli_configure(int argc, const char *const *argv, const char *cwd,
 		const char *flag = argv[i], *value = argv[i + 1];
 		const scalar_option *scalar = scalar_flag(flag);
 
-		if (!strcmp(flag, "--output")) {
+		if (!strcmp(flag, "--web-bind")) {
+			key = "web";
+			tg_vec raw{};
+			option_node *bind = nullptr;
+
+			if (emit_string(&raw, value))
+				bind = parse_value(&tree,
+					(const char *)raw.data);
+
+			if (!bind || !assign(&tree, root, "web.bind", bind))
+				status = tree.status < 0 ? tree.status :
+					TG_NO_MEMORY;
+			tg_vec_free(&raw);
+			if (status == TG_OK) {
+				option_node *enabled =
+					parse_value(&tree, "true");
+
+				if (!enabled || !assign(&tree, root,
+					"web.enabled", enabled))
+					status = tree.status;
+			}
+		} else if (!strcmp(flag, "--output")) {
 			key = "output";
 			if (!output_setting(&tree, root, value))
 				status = tree.status;
@@ -844,7 +1069,12 @@ tg_status tg_cli_configure(int argc, const char *const *argv, const char *cwd,
 		}
 	}
 	tg_vec serialized{};
+	tg_web_settings candidate_web{};
 
+	if (status == TG_OK && !web_extract(&tree, root, &candidate_web)) {
+		key = "web";
+		status = TG_INVALID;
+	}
 	if (status == TG_OK && !bounded_depth(root, 0)) {
 		key = "limit";
 		status = TG_LIMIT;
@@ -852,9 +1082,14 @@ tg_status tg_cli_configure(int argc, const char *const *argv, const char *cwd,
 	if (status == TG_OK && !serialize(&serialized, root, true))
 		status = serialized.size > 8 * 1024 * 1024 ? TG_LIMIT :
 			TG_NO_MEMORY;
-	if (status == TG_OK)
-		status = tg_config_parse({serialized.data, serialized.size},
-			(const char *)base.data, out, diagnostic);
+	if (status == TG_OK) {
+		tg_bytes bytes{serialized.data, serialized.size};
+		const char *base_path = (const char *)base.data;
+
+		status = managed ? tg_config_parse_managed(bytes, base_path,
+			out, diagnostic) : tg_config_parse(bytes, base_path,
+			out, diagnostic);
+	}
 	node_free(&tree, root);
 	tg_vec_free(&serialized);
 	tg_vec_free(&base);
@@ -865,5 +1100,16 @@ tg_status tg_cli_configure(int argc, const char *const *argv, const char *cwd,
 		return status;
 	}
 	*files = imported_files;
+	*web = candidate_web;
 	return TG_OK;
+}
+
+tg_status tg_cli_configure(int argc, const char *const *argv, const char *cwd,
+	tg_config **out, tg_import_files **files, tg_diagnostic *diagnostic)
+{
+	tg_web_settings web{};
+
+	tg_web_settings_default(&web);
+	return tg_cli_compose({}, argc, argv, cwd, false, out, files, &web,
+		diagnostic);
 }
