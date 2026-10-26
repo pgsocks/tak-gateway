@@ -331,23 +331,27 @@ requires separate byte/file quotas, restrictive permissions, and retention.
 
 ## Configuration, diagnostics, and deployment
 
-The planned executable commands are:
+The foreground CLI accepts output and settings arguments without a TOML file:
 
 ```sh
-tak-gateway validate-config --config gateway.toml
-tak-gateway validate-config --config gateway.toml --print-redacted
-tak-gateway run --config gateway.toml
-tak-gateway status --file /run/tak-gateway/status.json
-tak-gateway --version
+tak-gateway validate --import-zip server-package.zip \
+  --output local=tcp://127.0.0.1:9000
+tak-gateway redact --import-zip server-package.zip \
+  --output local=tcp://127.0.0.1:9000
+tak-gateway run --import-zip server-package.zip \
+  --output local=tcp://127.0.0.1:9000 --status-file status.json
 ```
 
-Versioned TOML holds endpoint collections, independent credentials, protocol
-choices, limits, and outputs. Reject unknown keys, duplicate IDs, invalid
+Optional versioned TOML holds endpoint collections, independent credentials,
+protocol choices, limits, and outputs. Import appends inputs, then CLI arguments
+override settings in order. `--output` replaces a matching output by ID;
+`--set` addresses any schema setting. See the [CLI contract](cli.md).
+Reject unknown keys, duplicate IDs, invalid
 ports, unsupported modes, missing secrets, impossible budgets, incompatible
 authentication/framing, and obvious ingress/output loops before opening
-network endpoints. `validate-config` checks configuration and secret
-references without connecting. CLI overrides cover logging and runtime-file
-locations; they cannot silently merge credentials. Reload requires restart
+network endpoints. `validate` checks configuration and secret references
+without connecting. Credentials remain explicit protected-file or environment
+references. Reload requires restart
 and can lose traffic during the gap.
 
 Passwords and key passphrases use protected files or named environment

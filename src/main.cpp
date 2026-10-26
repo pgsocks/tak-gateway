@@ -1,4 +1,5 @@
 #include "config_internal.h"
+#include "cli_options.h"
 #include <signal.h>
 #ifdef _WIN32
 #include <direct.h>
@@ -24,25 +25,46 @@ static int report(tg_status status, const tg_diagnostic *diagnostic, int code)
 
 static int usage(void)
 {
-	fputs("usage: tak-gateway {run|validate|redact} --config FILE\n",
+	fputs("usage: tak-gateway {run|validate|redact} [OPTIONS]\n"
+		"  --config FILE                 Optional base TOML\n"
+		"  --import-zip ZIP              Append ATAK package inputs\n"
+		"  --output ID=URI               Replace or append an output\n"
+		"    tcp://BIND:PORT | tcp-connect://HOST:PORT\n"
+		"    udp://HOST:PORT | pipe:///ABSOLUTE/PATH\n"
+		"  --set PATH=TOML_VALUE         Set any schema field\n"
+		"    Example: --set 'outputs[0].framing=\"xml-document\"'\n"
+		"  --status-file PATH            Runtime status snapshot\n"
+		"  --log-level LEVEL             info/debug/warning/error\n"
+		"  --log-format FORMAT           json/text\n"
+		"  --max-message-bytes N         Maximum event size\n"
+		"  --max-xml-depth N             Maximum XML nesting\n"
+		"  --retained-bytes N            Retained-event budget\n"
+		"  --queue-bytes N               Default output byte budget\n"
+		"  --queue-records N             Default output record budget\n"
+		"  --max-inputs N                Maximum configured inputs\n"
+		"  --max-outputs N               Maximum configured outputs\n"
+		"  --protobuf-extra-fields VALUE preserve-opaque/reject\n"
+		"  --overflow POLICY             drop-newest/fail\n"
+		"Setters apply after TOML/import, in command-line order.\n"
+		"Relative setting paths use the TOML directory, or cwd.\n",
 		stderr);
 	return 2;
 }
 
 int main(int argc, char **argv)
 {
-	if (argc == 2 && !strcmp(argv[1], "--help")) {
+	if ((argc == 2 && !strcmp(argv[1], "--help")) ||
+		(argc == 3 && !strcmp(argv[2], "--help"))) {
 		usage();
 		return 0;
 	}
-	if (argc != 4 || strcmp(argv[2], "--config"))
+	if (argc < 2)
 		return usage();
 	bool run = !strcmp(argv[1], "run");
 	bool validate = !strcmp(argv[1], "validate");
 	bool redact = !strcmp(argv[1], "redact");
 	if (!run && !validate && !redact)
 		return usage();
-
 	char directory[32768];
 #ifdef _WIN32
 	if (!_getcwd(directory, sizeof(directory)))
@@ -50,38 +72,15 @@ int main(int argc, char **argv)
 	if (!getcwd(directory, sizeof(directory)))
 #endif
 		return report(TG_IO, nullptr, 2);
-	tg_vec path{};
-	bool absolute = argv[3][0] == '/';
-#ifdef _WIN32
-	absolute = absolute || (strlen(argv[3]) > 2 && argv[3][1] == ':') ||
-		   argv[3][0] == '\\';
-#endif
-	if ((!absolute &&
-		    (!tg_text(&path, directory) || !tg_text(&path, "/"))) ||
-		!tg_text(&path, argv[3])) {
-		tg_vec_free(&path);
-		return report(TG_NO_MEMORY, nullptr, 2);
-	}
-	tg_buffer source{};
-	tg_status status = tg_read_file(
-		(const char *)path.data, 8 * 1024 * 1024, false, &source);
-	char *slash = strrchr((char *)path.data, '/');
-#ifdef _WIN32
-	char *backslash = strrchr((char *)path.data, '\\');
-	if (backslash && (!slash || backslash > slash))
-		slash = backslash;
-#endif
-	if (slash)
-		slash[slash == (char *)path.data ? 1 : 0] = 0;
 	tg_config *config = nullptr;
 	tg_diagnostic diagnostic{};
-	if (status == TG_OK)
-		status = tg_config_parse({source.data, source.size},
-			(const char *)path.data, &config, &diagnostic);
-	tg_buffer_release(&source);
-	tg_vec_free(&path);
-	if (status < 0)
+	tg_import_files *import_files = nullptr;
+	tg_status status = tg_cli_configure(argc - 2, argv + 2, directory,
+		&config, &import_files, &diagnostic);
+	if (status < 0) {
+		tg_import_zip_destroy(import_files);
 		return report(status, &diagnostic, 2);
+	}
 	if (redact) {
 		tg_buffer output{};
 		status = tg_config_redacted(config, &output, &diagnostic);
@@ -94,14 +93,17 @@ int main(int argc, char **argv)
 	}
 	if (status < 0 || !run) {
 		tg_config_destroy(config);
+		tg_import_zip_destroy(import_files);
 		return status < 0 ? report(status, &diagnostic, 2) : 0;
 	}
 
 	tg_runtime *runtime = nullptr;
 	status = tg_runtime_create(config, &runtime, &diagnostic);
 	tg_config_destroy(config);
-	if (status < 0)
+	if (status < 0) {
+		tg_import_zip_destroy(import_files);
 		return report(status, &diagnostic, 3);
+	}
 	signal(SIGINT, interrupt_handler);
 	signal(SIGTERM, interrupt_handler);
 	while (!interrupted && status == TG_OK)
@@ -122,5 +124,6 @@ int main(int argc, char **argv)
 		}
 	}
 	tg_runtime_destroy(runtime);
+	tg_import_zip_destroy(import_files);
 	return status < 0 ? report(status, nullptr, 3) : 0;
 }

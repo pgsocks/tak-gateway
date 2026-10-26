@@ -129,7 +129,8 @@ python3 tests/tak_server/harness.py run --skip-build \
 The runner generates a private TOML configuration with one XML-only TLS input,
 `inputs.tls.server_name = "takserver"`, certificate/key paths, a key password
 file, an atomic status snapshot path, and a loopback TCP output using `u32be`.
-It launches `tak-gateway run --config ...`, captures private logs, and waits for
+It launches the gateway with an isolated generated configuration, captures
+private logs, and waits for
 status indicating input `fixture` is `XML_ACTIVE` with
 `protocol_offer_received = true` and output `capture` is available. It then
 connects the collector before creating the mission.

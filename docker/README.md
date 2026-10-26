@@ -11,13 +11,15 @@ the gateway builder; host commands use Docker Compose.
 From the repository root as a non-root user:
 
 ```sh
-cp docker/gateway.toml.example docker/gateway.toml
 export TAK_GATEWAY_UID="$(id -u)" TAK_GATEWAY_GID="$(id -g)"
 docker compose -f docker/compose.yaml build takserver gateway
 docker compose -f docker/compose.yaml up -d --wait --wait-timeout 600
 docker compose -f docker/compose.yaml exec -T gateway \
   cat /run/tak-gateway/status.json
 ```
+
+The gateway receives its input, output, and status settings as
+[CLI arguments](../docs/cli.md); no TOML file is required.
 
 Initialization creates fresh passwords and server PKI, verifies authenticated
 REST readiness, and gives the gateway an encrypted client key, its password,

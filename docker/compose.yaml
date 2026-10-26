@@ -116,6 +116,22 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     user: "${TAK_GATEWAY_UID:-1000}:${TAK_GATEWAY_GID:-1000}"
+    command:
+      - run
+      - --set
+      - >-
+        inputs=[{id="tak",kind="tls",host="takserver",port=8089,
+        uid="gateway-reader",protocol="xml-only",
+        tls={ca_file="/run/credentials/ca.pem",
+        cert_file="/run/credentials/client.pem",
+        key_file="/run/credentials/client.key",
+        key_password_file="/run/credentials/key-password"}}]
+      - --output
+      - local=tcp://0.0.0.0:9000
+      - --status-file
+      - /run/tak-gateway/status.json
+    environment:
+      TMPDIR: /run/tak-gateway
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
@@ -130,12 +146,6 @@ services:
         published: "${TAK_GATEWAY_PORT:-9000}"
         host_ip: 127.0.0.1
     volumes:
-      - type: bind
-        source: ./gateway.toml
-        target: /config/gateway.toml
-        read_only: true
-        bind:
-          create_host_path: false
       - gateway-credentials:/run/credentials:ro
     tmpfs:
       - /run/tak-gateway:mode=0700,uid=${TAK_GATEWAY_UID:-1000},gid=${TAK_GATEWAY_GID:-1000}
