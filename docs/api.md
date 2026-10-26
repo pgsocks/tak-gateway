@@ -296,6 +296,9 @@ names as well as values with `<redacted>` and is not executable configuration.
 
 At least one enabled input/output is required. Each `[[inputs]]` has a unique
 nonempty `id`, `enabled=true` by default, and `kind=tls`, `udp` or `multicast`.
+An optional `name` is a display label and defaults to `id`. Managed application
+configuration permits empty or all-disabled collections for first setup; the
+public `tg_config_parse` contract remains strict.
 Plaintext legacy TCP is optional future compatibility; version 1 never enables
 it implicitly or falls back after TLS failure.
 
@@ -349,6 +352,7 @@ static outputs/routing must actually send to configured listeners.
 
 Each `[[outputs]]` has a unique nonempty `id`, `enabled=true` by default, and
 `kind=tcp`, `udp` or `pipe`. Per-output queue settings inherit limits.
+Its optional display `name` defaults to `id`.
 
 | Output key | Values/default | Rules |
 | --- | --- | --- |
@@ -470,7 +474,17 @@ preserves failure status for inspection before destruction.
 Main's signal handler sets an external flag; normal code calls stop. CLI exit
 codes are 0 for success/clean stop, 2 for invalid configuration/usage and 3 for
 fatal local runtime failures. Temporary upstream failure appears in status.
-Configuration changes require restart; no seamless hot reload is promised.
+Public lifecycle calls do not expose reconfiguration. The managed application
+uses private, serialized endpoint updates to preserve unchanged sources and
+outputs. Global settings are edited offline before restart.
+
+Version-1 snapshots additionally expose nonsecret structured `diagnostic` and
+bounded `attempts` records for each source. These retain stage/code, safe
+messages, native error domain/code, TLS verification/alert evidence and UTC
+millisecond timestamps after disconnect. The last 20 failures are retained.
+Credential submission alone is not acceptance. EOF after credentials without
+an explicit rejection remains an unconfirmed authentication/authorization
+outcome. Existing state, failure and counter fields retain their meanings.
 
 ## Caller examples
 

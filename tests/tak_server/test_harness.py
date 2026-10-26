@@ -300,6 +300,7 @@ class LifecycleTests(unittest.TestCase):
         process.poll.return_value = 7
         with tempfile.TemporaryDirectory() as directory:
             with mock.patch.object(h, 'validate_gateway', return_value='/binary'), \
+                    mock.patch.object(h.subprocess, 'run', return_value=mock.Mock(returncode=0)), \
                     mock.patch.object(h.subprocess, 'Popen', return_value=process), \
                     mock.patch.object(h.socket, 'socket') as socket_factory, \
                     mock.patch.object(h, 'stop_gateway') as stop:
@@ -440,7 +441,8 @@ class CompleteLifecycleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = pathlib.Path(directory)
             with mock.patch.object(h, 'validate_gateway', return_value='/gateway'), \
-                    mock.patch.object(h.subprocess, 'Popen', return_value=process), \
+                    mock.patch.object(h.subprocess, 'run', return_value=mock.Mock(returncode=0)) as configure, \
+                    mock.patch.object(h.subprocess, 'Popen', return_value=process) as launch, \
                     mock.patch.object(h.socket, 'socket') as socket_factory, \
                     mock.patch.object(h.socket, 'create_connection') as connect, \
                     mock.patch.object(h.Path, 'read_text', return_value=json.dumps(ready)):
@@ -448,13 +450,26 @@ class CompleteLifecycleTests(unittest.TestCase):
                 reservation.getsockname.return_value = ('127.0.0.1', 23456)
                 with h.managed_gateway('/gateway', path, {'tls_port': 12345}):
                     connect.assert_called_once_with(('127.0.0.1', 23456), timeout=1)
+                    configure.assert_called_once()
+                    configure_args = configure.call_args.args[0]
+                    self.assertEqual(configure_args[:3],
+                                     ['/gateway', 'config', '--state-dir'])
+                    storage = pathlib.Path(configure_args[3])
+                    self.assertEqual(configure_args[4:],
+                                     ['--config', str(path / 'gateway.toml')])
+                    self.assertEqual(launch.call_args.args[0],
+                                     ['/gateway', 'run', '--state-dir', str(storage)])
+                    self.assertTrue(storage.is_dir())
+                    self.assertEqual(storage.stat().st_mode & 0o777, 0o700)
                 process.terminate.assert_called_once()
+                self.assertFalse(storage.exists())
 
     def test_managed_gateway_cleanup_preserves_capture_error(self):
         process = mock.Mock()
         process.poll.return_value = 7
         with tempfile.TemporaryDirectory() as directory:
             with mock.patch.object(h, 'validate_gateway', return_value='/gateway'), \
+                    mock.patch.object(h.subprocess, 'run', return_value=mock.Mock(returncode=0)), \
                     mock.patch.object(h.subprocess, 'Popen', return_value=process), \
                     mock.patch.object(h.socket, 'socket') as socket_factory, \
                     mock.patch.object(h, 'stop_gateway',
@@ -465,6 +480,41 @@ class CompleteLifecycleTests(unittest.TestCase):
                     with h.managed_gateway('/gateway', pathlib.Path(directory),
                                            {'tls_port': 12345}):
                         pass
+
+    def test_managed_gateway_does_not_run_after_configuration_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory)
+            with mock.patch.object(h, 'validate_gateway', return_value='/gateway'), \
+                    mock.patch.object(h.subprocess, 'run',
+                                      return_value=mock.Mock(returncode=9)) as configure, \
+                    mock.patch.object(h.subprocess, 'Popen') as launch, \
+                    mock.patch.object(h.socket, 'socket') as socket_factory:
+                reservation = socket_factory.return_value.__enter__.return_value
+                reservation.getsockname.return_value = ('127.0.0.1', 23456)
+                with self.assertRaisesRegex(h.HarnessError, 'configuration.*9'):
+                    with h.managed_gateway('/gateway', path, {'tls_port': 12345}):
+                        self.fail('unreachable')
+                launch.assert_not_called()
+                storage = pathlib.Path(configure.call_args.args[0][3])
+                self.assertFalse(storage.exists())
+
+    def test_managed_gateway_configuration_timeout_removes_its_store(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory)
+            with mock.patch.object(h, 'validate_gateway', return_value='/gateway'), \
+                    mock.patch.object(h.subprocess, 'run',
+                                      side_effect=h.subprocess.TimeoutExpired(
+                                          'configuration', 30)) as configure, \
+                    mock.patch.object(h.subprocess, 'Popen') as launch, \
+                    mock.patch.object(h.socket, 'socket') as socket_factory:
+                reservation = socket_factory.return_value.__enter__.return_value
+                reservation.getsockname.return_value = ('127.0.0.1', 23456)
+                with self.assertRaisesRegex(h.HarnessError, 'configuration.*timed out'):
+                    with h.managed_gateway('/gateway', path, {'tls_port': 12345}):
+                        self.fail('unreachable')
+                launch.assert_not_called()
+                storage = pathlib.Path(configure.call_args.args[0][3])
+                self.assertFalse(storage.exists())
 
 
 if __name__ == '__main__':

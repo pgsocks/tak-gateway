@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>TAK Gateway</title>
+	<link rel="stylesheet" href="/styles.css">
+	<script src="/app.js" defer></script>
+</head>
+<body>
+	<header class="topbar">
+		<a class="brand" href="/" aria-label="TAK Gateway home"><span class="brand-mark" aria-hidden="true">TG</span><span>TAK Gateway<span class="brand-subtitle">Connection manager</span></span></a>
+		<div class="header-status"><span id="gateway-state" class="badge neutral">Connecting</span><span id="revision">Loading configuration</span></div>
+	</header>
+	<main>
+		<div id="notice" class="notice" role="status" hidden></div>
+		<section class="page-heading">
+			<div><p class="eyebrow">Gateway management</p><h1>Connections and delivery</h1><p class="subtitle">Configure TAK sources, choose outputs, and inspect connection health.</p></div>
+			<div id="refresh-status" class="refresh-status" aria-live="polite">Waiting for the gateway…</div>
+		</section>
+		<section class="summary-grid" aria-label="Connection overview">
+			<div class="summary-card"><span class="summary-label">Configured connections</span><strong id="connection-count">—</strong></div>
+			<div class="summary-card"><span class="summary-label">Connected</span><strong id="connected-count">—</strong></div>
+			<div class="summary-card"><span class="summary-label">Need attention</span><strong id="attention-count">—</strong></div>
+			<div class="summary-card"><span class="summary-label">Outputs</span><strong id="output-count">—</strong></div>
+		</section>
+		<section class="workspace">
+			<div class="workspace-toolbar">
+				<div class="tabs" role="tablist" aria-label="Gateway configuration">
+					<button id="connections-tab" class="tab active" role="tab" aria-selected="true" aria-controls="connections-panel">Connections</button>
+					<button id="outputs-tab" class="tab" role="tab" aria-selected="false" aria-controls="outputs-panel">Outputs</button>
+				</div>
+				<div id="connection-actions" class="actions"><button id="import-zip" class="button secondary">Import ZIP</button><button id="add-connection" class="button primary">Add connection</button></div>
+				<div id="output-actions" class="actions" hidden><button id="add-output" class="button primary">Add output</button></div>
+			</div>
+			<section id="connections-panel" role="tabpanel" aria-labelledby="connections-tab">
+				<div class="table-scroll"><table><thead><tr><th scope="col">Connection</th><th scope="col">Protocol</th><th scope="col">Status</th><th scope="col">Activity</th><th scope="col" class="actions-heading">Actions</th></tr></thead><tbody id="connection-rows"></tbody></table></div>
+				<div id="connections-empty" class="empty-state" hidden><div class="empty-icon" aria-hidden="true">＋</div><h2>No TAK connections yet</h2><p>Import an ATAK configuration ZIP or add a server and its credentials manually.</p><button class="button primary" data-action="add-connection">Add your first connection</button></div>
+			</section>
+			<section id="outputs-panel" role="tabpanel" aria-labelledby="outputs-tab" hidden>
+				<div class="table-scroll"><table><thead><tr><th scope="col">Output</th><th scope="col">Delivery</th><th scope="col">Status</th><th scope="col">Queue</th><th scope="col" class="actions-heading">Actions</th></tr></thead><tbody id="output-rows"></tbody></table></div>
+				<div id="outputs-empty" class="empty-state" hidden><div class="empty-icon" aria-hidden="true">↗</div><h2>No outputs configured</h2><p>Add a TCP, UDP, or pipe output to forward received events to your consumers.</p><button class="button primary" data-action="add-output">Add your first output</button></div>
+			</section>
+		</section>
+		<footer class="page-footer"><span>Changes are saved and applied to the affected endpoint.</span><span>Keep the management interface on localhost unless remote access is intentional.</span></footer>
+	</main>
+	<dialog id="editor-dialog" class="editor-dialog" aria-labelledby="editor-title">
+		<form id="endpoint-form">
+			<div class="dialog-heading"><div><p id="editor-eyebrow" class="eyebrow">Connection</p><h2 id="editor-title">Add connection</h2></div><button type="button" class="icon-button close-dialog" aria-label="Close editor">×</button></div>
+			<p id="editor-help" class="dialog-help"></p>
+			<div id="form-error" class="notice error" role="alert" hidden></div>
+			<div id="editor-fields"></div>
+			<div class="dialog-footer"><span id="editor-save-note">Saved configuration survives restarts.</span><div class="actions"><button type="button" class="button secondary close-dialog">Cancel</button><button id="save-endpoint" type="submit" class="button primary">Save and apply</button></div></div>
+		</form>
+	</dialog>
+	<dialog id="details-dialog" class="details-dialog" aria-labelledby="details-title">
+		<div class="dialog-heading"><div><p class="eyebrow">Connection details</p><h2 id="details-title">Status details</h2></div><button type="button" class="icon-button" data-close="details-dialog" aria-label="Close details">×</button></div>
+		<div id="details-content"></div>
+		<div class="dialog-footer"><span>Only evidence supplied by the transport and server is shown.</span><button class="button secondary" data-close="details-dialog">Close</button></div>
+	</dialog>
+	<dialog id="import-dialog" class="editor-dialog" aria-labelledby="import-title">
+		<div class="dialog-heading"><div><p class="eyebrow">ATAK configuration</p><h2 id="import-title">Import a configuration ZIP</h2></div><button type="button" class="icon-button" data-close="import-dialog" aria-label="Close import">×</button></div>
+		<div id="import-error" class="notice error" role="alert" hidden></div>
+		<label class="upload-drop" for="zip-file"><strong>Choose an ATAK package</strong><span>Standard mission package or a transport ZIP with certificates. Maximum 16 MiB.</span><input type="file" id="zip-file" accept=".zip,application/zip"></label>
+		<div id="import-progress" class="muted" role="status" hidden></div>
+		<div id="import-preview" hidden></div>
+		<div class="dialog-footer"><span>Review the connections before saving. Uploaded ZIPs are not retained.</span><div class="actions"><button class="button secondary" data-close="import-dialog">Cancel</button><button id="confirm-import" class="button primary" disabled>Import connections</button></div></div>
+	</dialog>
+	<dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-title">
+		<h2 id="confirm-title">Remove endpoint?</h2><p id="confirm-description"></p><div class="actions"><button class="button secondary" id="cancel-remove">Cancel</button><button class="button danger" id="confirm-remove">Remove</button></div>
+	</dialog>
+</body>
+</html>

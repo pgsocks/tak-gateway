@@ -40,6 +40,8 @@ struct temporary_file {
 struct tg_import_files {
 	char *directory;
 	temporary_file *files;
+	bool password_auth;
+	bool enrollment;
 };
 
 struct preference {
@@ -424,6 +426,27 @@ static const char *setting(xml_reader *r, const char *key, unsigned index,
 	return result || !global ? result : value(r, key, false);
 }
 
+static bool requested(const char *text)
+{
+	return text && !strcmp(text, "true");
+}
+
+static void collect_requirements(xml_reader *preferences, unsigned index,
+	tg_import_files *files)
+{
+	files->password_auth = files->password_auth || requested(
+		setting(preferences, "useAuth", index, false));
+	char global[160];
+
+	snprintf(global, sizeof(global), "enrollForCertificateWithTrust%u",
+		index);
+	files->enrollment = files->enrollment || requested(setting(preferences,
+		"enrollForCertificateWithTrust", index, false)) ||
+		requested(value(preferences, global, false)) ||
+		requested(value(preferences, "enrollForCertificateWithTrust",
+			false));
+}
+
 static bool integer(const char *s, unsigned maximum, unsigned *out)
 {
 	if (!s || !*s)
@@ -661,6 +684,87 @@ static int matching_certificate(material *m)
 		}
 	ERR_clear_error();
 	return -1;
+}
+
+tg_status tg_import_pkcs12_identity(tg_bytes bundle, const char *password,
+	tg_buffer *certificates, tg_buffer *key, tg_diagnostic *diagnostic)
+{
+	if (diagnostic)
+		*diagnostic = {};
+	if (!tg_span(bundle) || !bundle.size ||
+		!tg_empty(certificates) || !tg_empty(key) ||
+		certificates == key)
+		return failure(diagnostic, TG_INVALID, "pkcs12_identity");
+	if (bundle.size > 8 * 1024 * 1024 ||
+		(password && strlen(password) > 65536))
+		return failure(diagnostic, TG_LIMIT, "pkcs12_identity");
+	OSSL_LIB_CTX *context = OSSL_LIB_CTX_new();
+	OSSL_PROVIDER *defaults = context ?
+		OSSL_PROVIDER_load(context, "default") : nullptr;
+	OSSL_PROVIDER *legacy = context ?
+		OSSL_PROVIDER_load(context, "legacy") : nullptr;
+	OSSL_LIB_CTX *previous = defaults ?
+		OSSL_LIB_CTX_set0_default(context) : nullptr;
+	tg_status status = !context ? TG_NO_MEMORY :
+		!defaults ? TG_UNSUPPORTED : !previous ? TG_NO_MEMORY : TG_OK;
+	zip_entry entry{};
+	material identity{};
+	BIO *certificate_bio = nullptr;
+	BIO *key_bio = nullptr;
+	int leaf = -1;
+
+	entry.bytes = {const_cast<uint8_t *>(bundle.data), bundle.size};
+	if (status == TG_OK &&
+		(!material_read(&entry, password, &identity) ||
+		 (leaf = matching_certificate(&identity)) < 0))
+		status = TG_INVALID;
+	if (status == TG_OK) {
+		certificate_bio = BIO_new(BIO_s_mem());
+		key_bio = BIO_new(BIO_s_mem());
+		if (!certificate_bio || !key_bio)
+			status = TG_NO_MEMORY;
+	}
+	if (status == TG_OK &&
+		PEM_write_bio_X509(certificate_bio,
+			identity.certificates[leaf]) != 1)
+		status = TG_INVALID;
+	for (size_t i = 0; status == TG_OK && i < identity.count; ++i)
+		if ((int)i != leaf && PEM_write_bio_X509(certificate_bio,
+			identity.certificates[i]) != 1)
+			status = TG_INVALID;
+	if (status == TG_OK && PEM_write_bio_PrivateKey(key_bio,
+		identity.key, nullptr, nullptr, 0, nullptr, nullptr) != 1)
+		status = TG_INVALID;
+	char *certificate_bytes = nullptr;
+	char *key_bytes = nullptr;
+	long certificate_size = certificate_bio ?
+		BIO_get_mem_data(certificate_bio, &certificate_bytes) : 0;
+	long key_size = key_bio ? BIO_get_mem_data(key_bio, &key_bytes) : 0;
+
+	if (status == TG_OK) {
+		status = tg_copy({(const uint8_t *)certificate_bytes,
+			(size_t)certificate_size}, certificates);
+		if (status == TG_OK)
+			status = tg_copy({(const uint8_t *)key_bytes,
+				(size_t)key_size}, key);
+	}
+	if (key_size > 0)
+		OPENSSL_cleanse(key_bytes, (size_t)key_size);
+	BIO_free(certificate_bio);
+	BIO_free(key_bio);
+	material_clear(&identity);
+	if (previous)
+		OSSL_LIB_CTX_set0_default(previous);
+	OSSL_PROVIDER_unload(legacy);
+	OSSL_PROVIDER_unload(defaults);
+	OSSL_LIB_CTX_free(context);
+	ERR_clear_error();
+	if (status < 0) {
+		clear_buffer(certificates);
+		clear_buffer(key);
+		return failure(diagnostic, status, "pkcs12_identity");
+	}
+	return TG_OK;
 }
 
 static bool find_identity(archive *package, archive *outer,
@@ -957,10 +1061,14 @@ static tg_status import_stream(xml_reader *preferences, unsigned index,
 	}
 	if (status == TG_OK) {
 		*diagnostic_key = "configuration";
+		const char *name = setting(preferences, "description", index,
+			false);
+
 		if (!tg_printf(text,
 			"\n[[inputs]]\nid = \"atak-%u\"\nkind = \"tls\"\n"
 			"uid = \"atak-%u\"\nprotocol = \"xml-only\"\n"
 			"port = %u\n", index, index, port) ||
+			!emit(text, "name", name && *name ? name : host) ||
 			!emit(text, "host", host) ||
 			!tg_text(text, "[inputs.tls]\n") ||
 			!emit(text, "ca_file", ca_path) ||
@@ -968,6 +1076,8 @@ static tg_status import_stream(xml_reader *preferences, unsigned index,
 			!emit(text, "key_file", key_path))
 			status = TG_NO_MEMORY;
 	}
+	if (status == TG_OK)
+		collect_requirements(preferences, index, files);
 	material_clear(&trust);
 	material_clear(&client);
 	free(host);
@@ -1113,6 +1223,26 @@ tg_status tg_import_zip(const char *path, tg_buffer *toml,
 	*toml = {text.data, text.size};
 	*files = owned;
 	return TG_OK;
+}
+
+void tg_import_zip_requirements(const tg_import_files *files,
+	bool *password_auth, bool *enrollment)
+{
+	if (password_auth)
+		*password_auth = files && files->password_auth;
+	if (enrollment)
+		*enrollment = files && files->enrollment;
+}
+
+bool tg_import_files_contains(const tg_import_files *files, const char *path)
+{
+	if (!files || !path)
+		return false;
+	for (const temporary_file *file = files->files; file;
+		file = file->next)
+		if (!strcmp(file->path, path))
+			return true;
+	return false;
 }
 
 void tg_import_zip_destroy(tg_import_files *files)

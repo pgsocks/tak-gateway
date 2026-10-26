@@ -38,7 +38,8 @@ ctest --preset default
 ```
 
 The build checks both header language interfaces and runs the native tests.
-OpenSSL, c-ares, Expat, miniz, TOML parsing, and the CoT codec are acquired through
+OpenSSL, c-ares, Expat, miniz, CivetWeb, yyjson, TOML parsing and the CoT codec
+are acquired through
 CPM. Building OpenSSL from source requires Perl and Make (nmake on Windows).
 For a local build, `TG_USE_SYSTEM_OPENSSL=ON` selects an installed OpenSSL 3;
 put environment-specific settings in ignored `CMakeUserPresets.json`.
@@ -56,34 +57,57 @@ ctest --preset acceptance -L '^(unit|acceptance)$'
 Runner infrastructure and populated product suites must pass. Native Cucumber
 steps call the same public library used by the executable.
 
-## Authenticate with one TAK Server
+## Configure once, then run
 
-After [building](#build-and-run-contract-tests), import an administrator-provided
-ATAK package and choose a local output directly on the command line:
+Configure the gateway offline, then start it from the saved settings:
 
 ```sh
-build/src/tak-gateway run --import-zip server-package.zip \
-  --output local=tcp://127.0.0.1:9000 --status-file status.json
+build/src/tak-gateway config --import-zip server-package.zip \
+  --output local=tcp://127.0.0.1:9000 \
+  --status-file status.json --web-bind 127.0.0.1:8080
+build/src/tak-gateway run
 ```
 
-No TOML file is required. Use `validate` with the same arguments to check local
-settings without connecting, or `redact` to inspect the resolved settings
-without secret references. Repeat `--output` for additional consumers. See
-[CLI arguments](docs/cli.md) for output types, settings and TOML overrides, and
-[ATAK packages](docs/atak-import.md) for the uploaded ZIP's structure and live
-connection results.
+Open `http://127.0.0.1:8080` to add or edit TAK connections and outputs,
+upload an ATAK ZIP, or configure a connection manually. The GUI saves changes
+and applies them without restarting unrelated connections or outputs. Its
+connection details distinguish DNS, TCP, TLS, certificate and protocol errors.
+A server that closes after credentials without an explanation is shown as
+unconfirmed authentication, rather than a guessed password failure.
 
-In another terminal, inspect `status.json`: look for `XML_ACTIVE`, then confirm
-`events_received` increases when the server sends an event authorized for your
-identity. Validation, `XML_ACTIVE`, and `credentials_sent` alone do not prove
-server acceptance; `credentials_sent=false` is normal for certificate-only
-authentication. For `BACKOFF`, inspect `failure` and `reconnects`; check the
-endpoint, CA, certificate hostname, credentials, and server permissions.
-
-For separate PEM credentials, configure the TLS input through `--set`:
+The web interface is optional and has no login. Prefer a localhost bind;
+selecting a LAN/WAN address gives clients reaching that address control over
+the gateway. To disable it offline, use:
 
 ```sh
-build/src/tak-gateway run \
+build/src/tak-gateway config --set 'web.enabled=false'
+```
+
+`config` edits a persistent store and exits without connecting. `run` accepts
+only the state-directory selector and loads that store. `validate` checks saved
+references without connecting, and `redact` prints saved settings without
+passwords or private-key references:
+
+```sh
+build/src/tak-gateway validate
+build/src/tak-gateway redact
+```
+
+Select an independent instance with `--state-dir DIRECTORY`, or set
+`TAK_GATEWAY_STATE_DIR`. The default is the platform's per-user state directory.
+CLI edits require the gateway to be stopped; use the GUI for live changes.
+An optional `config --config FILE` imports TOML as the new gateway base, with
+subsequent options overriding its fields. Later runs use the saved copy.
+
+See [CLI configuration](docs/cli.md), [web management](docs/web.md), and
+[ATAK packages](docs/atak-import.md) for options, package structure and the
+supplied package's live-connection results.
+
+For separate administrator-provided PEM credentials, configure the input with
+schema settings. Confirm the endpoint supports XML; `8089` is an example:
+
+```sh
+build/src/tak-gateway config \
   --set 'inputs[0].id="tak"' --set 'inputs[0].kind="tls"' \
   --set 'inputs[0].host="tak.example.com"' --set 'inputs[0].port=8089' \
   --set 'inputs[0].uid="gateway-reader"' \
@@ -92,13 +116,15 @@ build/src/tak-gateway run \
   --set 'inputs[0].tls.cert_file="credentials/client.pem"' \
   --set 'inputs[0].tls.key_file="credentials/client.key"' \
   --output local=tcp://127.0.0.1:9000 --status-file status.json
+build/src/tak-gateway run
 ```
 
-Confirm the endpoint supports XML; `8089` is an example port. Paths resolve
-from the working directory when no TOML file is supplied. On POSIX, protect
-private keys, bundles and password files with `chmod 600`. For an encrypted key,
-append `--set 'inputs[0].tls.key_password_file="credentials/key-password"'`.
-To use PKCS#12, replace the three PEM settings above with:
+Relative paths resolve beside an explicitly imported TOML file, otherwise from
+the configuration command's working directory, and are saved resolved. On
+POSIX, protect private keys, bundles and password files with `chmod 600`.
+For encrypted PEM, add
+`--set 'inputs[0].tls.key_password_file="credentials/key-password"'`.
+For PKCS#12, replace the three PEM settings with:
 
 ```sh
 --set 'inputs[0].tls.ca_file="credentials/ca.pem"' \
@@ -106,7 +132,7 @@ To use PKCS#12, replace the three PEM settings above with:
 --set 'inputs[0].tls.pkcs12_password_file="credentials/bundle-password"'
 ```
 
-For streaming username/password authentication, append:
+For streaming username/password authentication, add:
 
 ```sh
 --set 'inputs[0].auth.mode="password"' \
@@ -114,15 +140,14 @@ For streaming username/password authentication, append:
 --set 'inputs[0].auth.password_file="credentials/password"'
 ```
 
-Passwords belong in the referenced files. Streaming credentials are separate
-from certificate enrollment and REST login; real-server password authorization
-remains [unverified](docs/testing.md#placement-and-maintenance).
-See the [API reference](docs/api.md#version-1-configuration-schema) for
-environment-variable alternatives and TLS `server_name` overrides, and the
-[output framing contract](docs/api.md#delivery-and-stream-boundaries) for reading
-TCP records. Ctrl-C stops intake and allows a two-second drain.
+Passwords belong in protected files or referenced environment variables.
+`XML_ACTIVE` and `credentials_sent` alone do not prove remote authorization;
+look for protocol offers or authorized events. See the
+[API reference](docs/api.md#version-1-configuration-schema) and
+[output framing contract](docs/api.md#delivery-and-stream-boundaries).
+Ctrl-C stops intake and allows a two-second drain.
 
-For a local TAK Server and gateway stack, see the
+For a local TAK Server and gateway stack with persistent settings, see the
 [Docker Compose quickstart](docker/README.md).
 
 ## Docker TAK Server harness

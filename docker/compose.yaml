@@ -116,21 +116,23 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     user: "${TAK_GATEWAY_UID:-1000}:${TAK_GATEWAY_GID:-1000}"
-    command:
-      - run
-      - --set
-      - >-
-        inputs=[{id="tak",kind="tls",host="takserver",port=8089,
+    command: ["run"]
+    environment:
+      TAK_GATEWAY_STATE_DIR: /var/lib/tak-gateway
+      TAK_GATEWAY_WEB_BIND: "${TAK_GATEWAY_WEB_BIND:-0.0.0.0:8080}"
+      TAK_GATEWAY_OUTPUTS: "${TAK_GATEWAY_OUTPUTS-local=tcp://0.0.0.0:9000}"
+      TAK_GATEWAY_STATUS_FILE: /run/tak-gateway/status.json
+      TAK_GATEWAY_CONFIG_FILE: "${TAK_GATEWAY_CONFIG_FILE:-}"
+      TAK_GATEWAY_IMPORT_ZIP: "${TAK_GATEWAY_IMPORT_ZIP:-}"
+      TAK_GATEWAY_SET: >-
+        ${TAK_GATEWAY_SET-inputs=[{id="tak",kind="tls",host="takserver",port=8089,
         uid="gateway-reader",protocol="xml-only",
         tls={ca_file="/run/credentials/ca.pem",
         cert_file="/run/credentials/client.pem",
         key_file="/run/credentials/client.key",
-        key_password_file="/run/credentials/key-password"}}]
-      - --output
-      - local=tcp://0.0.0.0:9000
-      - --status-file
-      - /run/tak-gateway/status.json
-    environment:
+        key_password_file="/run/credentials/key-password"}}]}
+      TAK_GATEWAY_LOG_LEVEL: "${TAK_GATEWAY_LOG_LEVEL:-}"
+      TAK_GATEWAY_LOG_FORMAT: "${TAK_GATEWAY_LOG_FORMAT:-}"
       TMPDIR: /run/tak-gateway
     read_only: true
     cap_drop: [ALL]
@@ -142,11 +144,23 @@ services:
       takserver:
         condition: service_healthy
     ports:
+      - "127.0.0.1:8080:8080"
       - target: 9000
         published: "${TAK_GATEWAY_PORT:-9000}"
         host_ip: 127.0.0.1
     volumes:
+      - type: bind
+        source: ./state
+        target: /var/lib/tak-gateway
+        bind:
+          create_host_path: false
       - gateway-credentials:/run/credentials:ro
+      - type: bind
+        source: ./credentials
+        target: /run/imports
+        read_only: true
+        bind:
+          create_host_path: false
     tmpfs:
       - /run/tak-gateway:mode=0700,uid=${TAK_GATEWAY_UID:-1000},gid=${TAK_GATEWAY_GID:-1000}
 
