@@ -1,9 +1,11 @@
 # Connect TAK Gateway with Docker Compose
 
 This runs only the gateway, connecting to an existing TAK Server over verified
-TLS. Use Docker Engine with Compose v2 and BuildKit; the first build downloads
-the toolchain and pinned source dependencies. Run these commands from the
-repository root as a non-root user:
+TLS. Install Docker Engine with Compose v2 and BuildKit on the host. Compose
+builds the image and starts the container; CMake and the compiler run inside
+the image's build stage. The first build downloads the toolchain and pinned
+source dependencies. Run these commands from the repository root as a non-root
+user:
 
 ```sh
 mkdir -p docker/credentials
@@ -21,6 +23,11 @@ the container uses your UID/GID to read them.
 
 ```sh
 docker compose -f docker/compose.yaml build
+```
+
+Validate the configuration, then start the gateway and inspect its status:
+
+```sh
 docker compose -f docker/compose.yaml run --rm --no-deps gateway \
   validate --config /config/gateway.toml
 docker compose -f docker/compose.yaml up -d
