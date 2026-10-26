@@ -1,0 +1,26 @@
+version = 1
+
+[process]
+status_file = "/run/tak-gateway/status.json"
+
+[[inputs]]
+id = "tak"
+kind = "tls"
+host = "tak.example.com"
+port = 8089
+uid = "gateway-reader"
+protocol = "xml-only"
+
+[inputs.tls]
+ca_file = "/run/credentials/ca.pem"
+cert_file = "/run/credentials/client.pem"
+key_file = "/run/credentials/client.key"
+# For an encrypted private key:
+# key_password_file = "/run/credentials/key-password"
+
+[[outputs]]
+id = "local"
+kind = "tcp"
+bind = "0.0.0.0"
+port = 9000
+framing = "u32be"

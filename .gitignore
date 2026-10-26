@@ -2,3 +2,5 @@
 /CMakeUserPresets.json
 /.bundle/
 /vendor/bundle/
+/docker/gateway.toml
+/docker/credentials/
