@@ -1,0 +1,9 @@
+*
+!CMakeLists.txt
+!CMakePresets.json
+!cmake/
+!cmake/**
+!include/
+!include/**
+!src/
+!src/**

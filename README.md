@@ -43,18 +43,6 @@ CPM. Building OpenSSL from source requires Perl and Make (nmake on Windows).
 For a local build, `TG_USE_SYSTEM_OPENSSL=ON` selects an installed OpenSSL 3;
 put environment-specific settings in ignored `CMakeUserPresets.json`.
 
-Run the foreground gateway with a configuration matching
-[the TOML schema](docs/api.md):
-
-```sh
-build/src/tak-gateway validate --config gateway.toml
-build/src/tak-gateway redact --config gateway.toml
-build/src/tak-gateway run --config gateway.toml
-```
-
-`redact` prints explicit defaults with secret references removed. SIGINT or
-SIGTERM stops intake and permits a two-second drain before exit.
-
 Acceptance testing also needs Ruby, Bundler, and `patch`:
 
 ```sh
@@ -67,6 +55,86 @@ ctest --preset acceptance -L '^(unit|acceptance)$'
 
 Runner infrastructure and populated product suites must pass. Native Cucumber
 steps call the same public library used by the executable.
+
+## Authenticate with one TAK Server
+
+After [building](#build-and-run-contract-tests), obtain the streaming endpoint,
+trusted CA, and authorized client certificate/key from your server administrator.
+Confirm the endpoint supports XML; `8089` below is an example streaming port.
+Save this as `gateway.toml`, replacing the hostname and credential paths:
+
+```toml
+version = 1
+
+[process]
+status_file = "status.json"
+
+[[inputs]]
+id = "tak"
+kind = "tls"
+host = "tak.example.com"
+port = 8089
+uid = "gateway-reader"
+protocol = "xml-only"
+
+[inputs.tls]
+ca_file = "credentials/ca.pem"
+cert_file = "credentials/client.pem"
+key_file = "credentials/client.key"
+
+[[outputs]]
+id = "local"
+kind = "tcp"
+bind = "127.0.0.1"
+port = 9000
+framing = "u32be"
+```
+
+Paths resolve relative to `gateway.toml`. On POSIX, use `chmod 600` for private
+keys, bundles, and password files. Validate local files/settings, then run:
+
+```sh
+build/src/tak-gateway validate --config gateway.toml
+build/src/tak-gateway run --config gateway.toml
+```
+
+In another terminal, inspect `status.json`: look for `XML_ACTIVE`, then confirm
+`events_received` increases when the server sends an event authorized for your
+identity. Validation, `XML_ACTIVE`, and `credentials_sent` alone do not prove
+server acceptance; `credentials_sent=false` is normal for certificate-only
+authentication. For `BACKOFF`, inspect `failure` and `reconnects`; check the
+endpoint, CA, certificate hostname, credentials, and server permissions.
+
+For an encrypted PEM key, add `key_password_file = "credentials/key-password"`
+under `[inputs.tls]`. To use PKCS#12 instead, replace that entire table with:
+
+```toml
+[inputs.tls]
+ca_file = "credentials/ca.pem"
+pkcs12_file = "credentials/client.p12"
+pkcs12_password_file = "credentials/bundle-password"
+```
+
+If the server also requires streaming username/password authentication, add:
+
+```toml
+[inputs.auth]
+mode = "password"
+username = "reader"
+password_file = "credentials/password"
+```
+
+Passwords belong in the referenced files. Streaming credentials are separate
+from certificate enrollment and REST login; real-server password authorization
+remains [unverified](docs/testing.md#placement-and-maintenance).
+See the [API reference](docs/api.md#version-1-configuration-schema) for
+environment-variable alternatives and TLS `server_name` overrides, and the
+[output framing contract](docs/api.md#delivery-and-stream-boundaries) for reading
+TCP records. `build/src/tak-gateway redact --config gateway.toml` prints defaults
+without secret references. Ctrl-C stops intake and allows a two-second drain.
+
+To run the gateway in a container, see the
+[Docker Compose quickstart](docker/README.md).
 
 ## Docker TAK Server harness
 

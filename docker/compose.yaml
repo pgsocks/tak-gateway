@@ -1,0 +1,28 @@
+services:
+  gateway:
+    image: tak-gateway:local
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    user: "${TAK_GATEWAY_UID:-1000}:${TAK_GATEWAY_GID:-1000}"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 5s
+    ports:
+      - "127.0.0.1:9000:9000"
+    volumes:
+      - type: bind
+        source: ./gateway.toml
+        target: /config/gateway.toml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./credentials
+        target: /run/credentials
+        read_only: true
+        bind:
+          create_host_path: false
+    tmpfs:
+      - /run/tak-gateway:mode=0700,uid=${TAK_GATEWAY_UID:-1000},gid=${TAK_GATEWAY_GID:-1000}
