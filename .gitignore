@@ -4,3 +4,4 @@
 /vendor/bundle/
 /docker/gateway.toml
 /docker/credentials/
+/docker/__pycache__/

@@ -1,4 +1,115 @@
+x-server-image: &server-image
+  image: tak-gateway-server:local
+  pull_policy: never
+
 services:
+  bootstrap:
+    <<: *server-image
+    entrypoint: [python3, /bootstrap.py]
+    command:
+      - secrets
+      - --server-dir
+      - /run/server-secrets
+      - --database-dir
+      - /run/database-secrets
+      - --server-data
+      - /server-data
+      - --database-data
+      - /database
+    read_only: true
+    volumes:
+      - ./bootstrap.py:/bootstrap.py:ro
+      - server-secrets:/run/server-secrets
+      - database-secrets:/run/database-secrets
+      - server-data:/server-data:ro
+      - database:/database:ro
+    restart: "no"
+
+  takdb:
+    image: postgis/postgis@sha256:a2fc46b52819d25add4ed93d3da83e106e17ea3ace6883cce3791631c9820bb2
+    environment:
+      POSTGRES_DB: cot
+      POSTGRES_USER: martiuser
+      POSTGRES_PASSWORD_FILE: /run/database-secrets/password
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    volumes:
+      - database:/var/lib/postgresql/data
+      - database-secrets:/run/database-secrets:ro
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    mem_limit: 1g
+    restart: "no"
+
+  takserver:
+    <<: *server-image
+    build:
+      context: ../tests/tak_server
+      dockerfile: Dockerfile.source
+    entrypoint: [/bin/bash, -ec]
+    command:
+      - |
+        set -a
+        . /run/server-secrets/fixture.env
+        exec /bin/bash /opt/tak/fixture-entrypoint.sh
+    environment:
+      AUDIT_ENABLED: "false"
+      JSON_FORMAT_ENABLED: "false"
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+      takdb:
+        condition: service_healthy
+    ports:
+      - target: 8089
+        published: "${TAK_SERVER_TLS_PORT:-8089}"
+        host_ip: 127.0.0.1
+      - target: 8443
+        published: "${TAK_SERVER_REST_PORT:-8443}"
+        host_ip: 127.0.0.1
+    volumes:
+      - server-data:/opt/tak/data
+      - server-secrets:/run/server-secrets:ro
+    healthcheck:
+      test: [CMD, test, -f, /opt/tak/data/fixture.ready]
+      start_period: 180s
+      interval: 3s
+      timeout: 3s
+      retries: 100
+    mem_limit: 5g
+    stop_grace_period: 30s
+    restart: "no"
+
+  credentials:
+    <<: *server-image
+    entrypoint: [python3, /bootstrap.py]
+    command:
+      - credentials
+      - --server-data
+      - /server-data
+      - --server-secrets
+      - /run/server-secrets
+      - --output
+      - /run/credentials
+      - --uid
+      - "${TAK_GATEWAY_UID:-1000}"
+      - --gid
+      - "${TAK_GATEWAY_GID:-1000}"
+    depends_on:
+      takserver:
+        condition: service_healthy
+    read_only: true
+    volumes:
+      - ./bootstrap.py:/bootstrap.py:ro
+      - server-data:/server-data:ro
+      - server-secrets:/run/server-secrets:ro
+      - gateway-credentials:/run/credentials
+    restart: "no"
+
   gateway:
     image: tak-gateway:local
     build:
@@ -9,8 +120,15 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     stop_grace_period: 5s
+    depends_on:
+      credentials:
+        condition: service_completed_successfully
+      takserver:
+        condition: service_healthy
     ports:
-      - "127.0.0.1:9000:9000"
+      - target: 9000
+        published: "${TAK_GATEWAY_PORT:-9000}"
+        host_ip: 127.0.0.1
     volumes:
       - type: bind
         source: ./gateway.toml
@@ -18,11 +136,13 @@ services:
         read_only: true
         bind:
           create_host_path: false
-      - type: bind
-        source: ./credentials
-        target: /run/credentials
-        read_only: true
-        bind:
-          create_host_path: false
+      - gateway-credentials:/run/credentials:ro
     tmpfs:
       - /run/tak-gateway:mode=0700,uid=${TAK_GATEWAY_UID:-1000},gid=${TAK_GATEWAY_GID:-1000}
+
+volumes:
+  database:
+  server-data:
+  server-secrets:
+  database-secrets:
+  gateway-credentials:
