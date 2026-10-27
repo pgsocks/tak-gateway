@@ -112,14 +112,12 @@ jobs:
               }],
               "buildPresets" => [{
                 "name" => "ci",
-                "inherits" => "acceptance",
                 "configurePreset" => "ci"
               }],
               "testPresets" => [{
                 "name" => "ci",
                 "inherits" => "acceptance",
-                "configurePreset" => "ci",
-                "execution" => { "noTestsAction" => "error" }
+                "configurePreset" => "ci"
               }]
             }
             if ENV["CI_PERL_EXECUTABLE"]
@@ -136,8 +134,14 @@ jobs:
       - name: Build
         run: cmake --build --preset ci --parallel 2
 
-      - name: Run infrastructure regressions
-        run: ctest --preset ci -L '^infrastructure$'
+      - name: Run native and Cucumber suites
+        run: ctest --preset ci
 
-      - name: Run product unit and acceptance suites
-        run: ctest --preset ci -L '^(unit|acceptance)$'
+      - name: Run CLI and container entrypoint tests
+        if: matrix.cc == 'gcc-14'
+        env:
+          TAK_GATEWAY_BINARY: ${{ github.workspace }}/build/ci/src/tak-gateway
+        run: |
+          python3 -c 'import sys; assert sys.version_info >= (3, 11), "Python 3.11+ is required"'
+          python3 -m unittest discover -s tests/cli -p 'test_*.py'
+          python3 -m unittest discover -s tests/docker -p 'test_*.py'

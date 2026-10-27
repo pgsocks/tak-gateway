@@ -9,7 +9,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(CTest)
-option(BUILD_UNIT_TESTS "Build GoogleTest unit tests" ON)
 option(BUILD_ACCEPTANCE_TESTS "Build Cucumber acceptance tests" OFF)
 
 include(cmake/CPM.cmake)
@@ -23,7 +22,7 @@ add_subdirectory(cmake/dependencies/yyjson)
 
 add_subdirectory(src)
 
-if(BUILD_TESTING AND (BUILD_UNIT_TESTS OR BUILD_ACCEPTANCE_TESTS))
+if(BUILD_TESTING)
 	if(BUILD_ACCEPTANCE_TESTS)
 		include(cmake/AcceptancePrerequisites.cmake)
 	endif()

@@ -17,8 +17,8 @@ below.
 
 The inspected codec API document has Git blob
 `656849ee584bdb97249886adac7762e7aea61654`, matching the earlier design input.
-Pin source and distribution identities in the harness; a branch name or
-unversioned container tag does not reproduce these observations. Source
+Pin source and distribution identities in interoperability checks; a branch
+name or unversioned container tag does not reproduce these observations. Source
 URLs below are immutable commit URLs. Standards and platform documentation
 are explanatory references, not claims of newly executed platform tests.
 
@@ -157,7 +157,7 @@ borrowed views, explicit status returns, and no exception crossing. The
 gateway can use the same ownership vocabulary while keeping session and
 delivery responsibilities separate.
 
-## REST event generation for the official-server harness
+## REST event generation for interoperability checks
 
 The pinned server provides an evidence-backed trigger through mission
 creation. [`BaseRestController.java`][rest-base] supplies `/Marti/api`.
@@ -172,9 +172,9 @@ subscriber so creator suppression does not hide the announcement.
 constructs a `t-x-m-n` CoT mission CREATE announcement, with a server-generated
 event UID and mission fields including the mission name. Its delivery path
 checks groups, explicitly includes `__ANON__`, and skips the creator client
-UID. The harness must correlate mission name/type rather than assume the
-REST caller chooses the resulting event UID. Deleting the mission uses the
-corresponding mission DELETE operation and can emit `t-x-m-d`.
+UID. An interoperability check must correlate mission name/type rather than
+assume the REST caller chooses the resulting event UID. Deleting the mission
+uses the corresponding mission DELETE operation and can emit `t-x-m-d`.
 
 This is not a general arbitrary-CoT injection endpoint. In particular,
 [`CotApi.java`][cot-api]'s POST operation queries stored CoT by UIDs, while
@@ -189,13 +189,13 @@ an invented bearer token or HTTP Basic login. This is separate from a TAK
 streaming XML credential preamble. Keep chain and hostname verification
 enabled for both interfaces.
 
-Use the official server built from the pinned source. REST success establishes
+When checking an independently configured server, REST success establishes
 only that the operation succeeded: subscribe over XML/TLS before triggering,
-then observe a matching server-generated event. A supplied gateway run can
-add a downstream-framed-output assertion. Logs, deadlines, process/container
-cleanup, unique fixture names, and mission deletion are harness obligations.
-The harness [README](../tests/tak_server/README.md) defines reproducible build
-and execution commands and the tests actually supported.
+then observe a matching server-generated event at the gateway's framed output.
+Use logs, bounded deadlines, unique fixture names, and mission deletion to
+make the result observable and leave the server clean. The repository retains
+this protocol research but does not provision a server or maintain a live-server
+harness.
 
 The XML/TLS mission-trigger profile is a useful first interoperability
 fixture. It does not prove arbitrary XML byte preservation through a server,

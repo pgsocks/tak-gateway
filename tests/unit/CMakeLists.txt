@@ -6,7 +6,7 @@ target_link_libraries(framer_link_c11 PRIVATE tak_gateway)
 add_test(NAME framer_link_c11 COMMAND framer_link_c11)
 set_tests_properties(framer_link_c11 PROPERTIES LABELS unit)
 
-add_executable(unit_tests main.cpp
+add_executable(unit_tests
 	wire_test.cpp
 	normalization_test.cpp
 	session_test.cpp
@@ -21,7 +21,7 @@ add_executable(unit_tests main.cpp
 	managed_cli_test.cpp
 )
 target_link_libraries(unit_tests PRIVATE
-	tak_gateway GTest::gtest gateway_import_zip gateway_web gateway_toml
+	tak_gateway GTest::gtest_main gateway_import_zip gateway_web gateway_toml
 	OpenSSL::Crypto yyjson
 )
 target_compile_definitions(unit_tests PRIVATE
@@ -31,4 +31,5 @@ if(WIN32)
 	target_link_libraries(unit_tests PRIVATE ws2_32)
 endif()
 
-include(register.cmake)
+include(GoogleTest)
+gtest_discover_tests(unit_tests PROPERTIES LABELS unit)

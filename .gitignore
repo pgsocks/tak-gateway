@@ -2,7 +2,6 @@
 /CMakeUserPresets.json
 /.bundle/
 /vendor/bundle/
-/docker/gateway.toml
 /docker/credentials/
 /docker/state/
 __pycache__/

@@ -1,6 +1,3 @@
-set(CMAKE_CXX_STANDARD 17)
-include("${PROJECT_SOURCE_DIR}/cmake/CPM.cmake")
-
 add_subdirectory(googletest)
 
 if(BUILD_ACCEPTANCE_TESTS)

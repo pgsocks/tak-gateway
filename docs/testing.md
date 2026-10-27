@@ -2,26 +2,11 @@
 
 GoogleTest checks public API contracts. Cucumber describes observable behavior
 and workflows in Gherkin, with Cucumber-Cpp steps calling the public software
-interfaces. Populated native and acceptance suites exercise the gateway library.
-Separate infrastructure regressions verify runner behavior. All must pass.
+interfaces. Both suites exercise the gateway library and must pass.
 
 The build also compiles the public headers as C11 and procedural C++17.
-The [official TAK Server harness](../tests/tak_server/README.md) has independent
-Python standard-library tests and opt-in live REST-to-XML/TLS verification:
-
-```sh
-python3 -m unittest discover -s tests/tak_server -p 'test_*.py'
-python3 tests/tak_server/harness.py build
-python3 tests/tak_server/harness.py run --skip-build
-```
-
-The live smoke test uses the real source-built server and a reference TLS
-subscriber. Gateway mode requires a supplied working executable. Offline
-harness tests, source builds and reference-subscriber success do not establish
-live gateway interoperability. Network, TLS identity, multicast, FIFO and
-shutdown tests require their real OS prerequisites; do not replace failures
-with simulated success. Native Windows pipe behavior remains a platform
-verification obligation in the full design.
+Network, TLS identity, multicast, FIFO and shutdown tests require their real
+OS prerequisites; do not replace failures with simulated success.
 
 ## Placement and maintenance
 
@@ -36,16 +21,11 @@ Current contract coverage is grouped by public behavior:
 | Configuration | Schema, references, redaction, ownership, diagnostics | Validation before connecting |
 | Runtime adapters | Actual UDP/TCP sockets, POSIX FIFO, Linux multicast | Local network pipeline and lifecycle |
 
-The native suite covers parsing, conversion, ownership, queues, configuration,
-and real UDP/TCP/FIFO/Linux multicast adapters. The Docker harness verifies
-REST mission creation through both XML/TLS and negotiated Protobuf v1 ingress
-to the executable's framed XML output. Select the latter using
-`--gateway-protocol protobuf` together with `--gateway`.
-
-Additional platform/deployment checks remain: streaming-password authorization
-against a configured server, simultaneous real TLS sources, IPv6 multicast,
-native Windows named-pipe ACL/I/O, and supervised/read-only-container deployment.
-Do not infer these results from the mission smoke tests.
+Additional interoperability and deployment checks remain: streaming-password
+authorization against a configured server, simultaneous real TLS sources,
+IPv6 multicast, native Windows named-pipe ACL/I/O, and supervised/read-only
+container deployment.
+Verify live TAK Server interoperability against a separately configured server.
 
 Put unit test sources under `tests/unit/`. Cover normal results, contract
 boundaries, invalid inputs where specified, error results, and ownership or
@@ -72,29 +52,24 @@ matching configure, build, and test presets and its own build directory:
 | Preset | Build directory | Test selection |
 | --- | --- | --- |
 | `default` | `build` | Unit tests |
-| `acceptance` | `build/acceptance` | Both product suites and infrastructure |
-| `acceptance-only` | `build/acceptance-only` | Acceptance and infrastructure |
-| `no-suites` | `build/no-suites` | Both suite options off |
-| `no-tests` | `build/no-tests` | Test infrastructure off |
+| `acceptance` | `build/acceptance` | Unit and Cucumber acceptance tests |
+| `no-tests` | `build/no-tests` | Tests disabled |
 
-All test options are independent under CMake's standard master switch:
+Native tests are enabled through CMake's standard testing switch. Cucumber is
+an additional opt-in suite:
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `BUILD_TESTING` | `ON` | Enable test infrastructure and dependencies |
-| `BUILD_UNIT_TESTS` | `ON` | Build and discover GoogleTest unit cases |
+| `BUILD_TESTING` | `ON` | Build native tests and enable test dependencies |
 | `BUILD_ACCEPTANCE_TESTS` | `OFF` | Build and run Cucumber acceptance tests |
 
-`BUILD_TESTING=OFF` overrides both suite options. With both suite options off,
-no test dependencies are fetched. GoogleTest is fetched whenever either suite
-is enabled, because native Cucumber steps also use its assertions. Cucumber
-and its dependencies are fetched only for acceptance tests. All dependencies
-use pinned CPM packages and are excluded from installation.
+`BUILD_TESTING=OFF` disables both suites and their dependencies. GoogleTest is
+fetched whenever testing is enabled. Cucumber and its dependencies are fetched
+only for acceptance tests. All dependencies use pinned CPM packages and are
+excluded from installation.
 
-Infrastructure regressions are enabled with acceptance testing and use the
-same prerequisites. They have the `infrastructure` label, which is separate
-from product labels `unit` and `acceptance`. The default configuration remains
-Ruby-free. The `no-suites` and `no-tests` presets explicitly allow no CTest
+The default configuration remains Ruby-free. CTest labels native tests `unit`
+and the Cucumber suite `acceptance`. The `no-tests` preset allows no CTest
 entries; the other shared test presets fail when a filter selects no entries.
 
 Library code and test tooling use C++17, with C11-compatible public headers.
@@ -134,17 +109,15 @@ ctest --preset default
 ctest --preset default -L unit
 ```
 
-An empty `unit_tests` runner fails normal execution. CTest registers a failing
-`unit_empty` entry when GoogleTest discovery finds zero cases, even when other
-suites have tests. After adding cases, `gtest_discover_tests` automatically
-discovers them, applies the `unit` label, and removes the empty-suite fallback.
-Listing remains valid with no cases. List or focus cases with CTest or GoogleTest:
+The runner uses GoogleTest's standard main function. CMake's
+`gtest_discover_tests` discovers its cases and applies the `unit` label. List
+or focus cases with CTest or GoogleTest:
 
 ```sh
 ctest --preset default -N
-ctest --preset default -L unit -R 'SuiteName.CaseName'
+ctest --preset default -L unit -R '^Runtime\.'
 ./build/tests/unit/unit_tests --gtest_list_tests
-./build/tests/unit/unit_tests --gtest_filter='SuiteName.*'
+./build/tests/unit/unit_tests --gtest_filter='Runtime.*'
 ```
 
 For a multi-configuration generator, use local build and test presets with
@@ -196,18 +169,19 @@ to forced cleanup after two seconds if necessary. Each invocation gets its
 own server and port.
 
 Use the launcher for feature paths, line selectors, and tag filters. Run these
-commands from the repository root, substituting an existing feature and tag:
+commands from the repository root:
 
 ```sh
 ruby tests/acceptance/run.rb build/acceptance/tests/acceptance/acceptance_steps
 ruby tests/acceptance/run.rb \
 	build/acceptance/tests/acceptance/acceptance_steps \
-	features/workflow.feature
+	features/runtime.feature
 ruby tests/acceptance/run.rb \
 	build/acceptance/tests/acceptance/acceptance_steps \
-	features/workflow.feature:12
+	features/runtime.feature:4
 ruby tests/acceptance/run.rb \
-	build/acceptance/tests/acceptance/acceptance_steps --tags '@workflow'
+	build/acceptance/tests/acceptance/acceptance_steps \
+	--name '^Preserve complete events through actual local sockets$'
 ```
 
 Additional Cucumber arguments are forwarded; strict mode remains enabled.
@@ -217,68 +191,22 @@ under `tests/acceptance/Debug/` after a Debug build.
 
 [upstream-gems]: https://github.com/cucumber/cucumber-cpp/blob/v0.9.0/Gemfile
 
-## Infrastructure regressions
-
-After configuring and building an acceptance-enabled preset, run the permanent
-runner checks from the repository root:
-
-```sh
-ctest --preset acceptance -L infrastructure
-ctest --preset acceptance -L '^(unit|acceptance)$'
-```
-
-Both commands must pass. Running `ctest --preset acceptance` executes all
-groups. CI runs infrastructure first, then product suites for each compiler.
-
-Fixtures under `tests/infrastructure/` exercise real native wire steps and
-controlled startup, exit, and process-tree behavior. The harness also checks
-empty and populated unit discovery using an isolated CMake project. Acceptance
-runs use temporary copies of the launcher, bundle manifest, and support glue,
-so added product features and hooks do not affect these fixtures. Fixture
-cases and features are not registered in the product suites. Temporary files,
-ports, children, and descendants are cleaned up after each check, including
-failure. The harness uses Ruby's standard library and the existing native test
-dependencies.
-
-Checks cover successful and focused execution, custom formatting, strict step
-failures, empty selections, missing executables and gems, early exit, startup
-timeout, excessive readiness output, server and consumer failures, forced
-cleanup, interruption, and concurrent isolation. Repeated fixture invocations
-also exercise port reuse. On POSIX, interruption uses an actual `SIGINT`. On
-Windows, where CI may lack a console, a fixture raises the same exception as
-the launcher's signal handler; delivery of console events remains environment
-dependent.
-
-If a regression fails, inspect its diagnostic and CTest's captured output.
-Rebuild after modifying native fixtures and rerun the infrastructure label.
-Avoid moving fixture cases into product directories to make empty suites pass.
-
 ## Common setup issues
 
 - If configuration reports missing Ruby or Bundler, install them and ensure
   both executables are on `PATH`, or select matching paths in a user preset.
 - If configuration or the launcher reports unavailable gems, run
   `bundle install` with the selected Ruby and Bundler, then configure again.
-- If a unit suite contains no cases, register real product unit sources and
-  rebuild. If acceptance selects no scenarios, add product features or correct
+- If acceptance selects no scenarios, add product features or correct
   the focused path, line selector, or tag filter.
 - If a shared preset selects no CTest entries, check the label or regular
-  expression. Use the explicit opt-out presets when intentionally disabling
-  product testing.
+  expression. Use `no-tests` when intentionally disabling testing.
 
 ## Opting out
 
-Build acceptance tests alone, disable units, or disable all tests:
+Disable all tests and their dependencies:
 
 ```sh
-cmake --preset acceptance-only
-cmake --build --preset acceptance-only
-ctest --preset acceptance-only -L acceptance
-
-cmake --preset no-suites
-cmake --build --preset no-suites
-ctest --preset no-suites
-
 cmake --preset no-tests
 cmake --build --preset no-tests
 ctest --preset no-tests
@@ -315,9 +243,11 @@ depending on another scenario's actions or fixtures.
 
 Before review, follow the checks in [CONTRIBUTING.md](../CONTRIBUTING.md).
 Run both suites for affected behavior and inspect the discovered test and
-scenario counts. For runner or build changes, exercise all five build
-selections, failure results, focused runs, repeated runs, missing
-prerequisites, startup failures, interrupts, and server cleanup.
+scenario counts. For build or runner changes, configure, build, and test
+`default`, `acceptance`, and `no-tests`. Check relevant acceptance runner
+behavior: focused and repeated runs, strict step failures, empty selections,
+missing prerequisites, startup failures, interruption, and child-process
+cleanup. Concurrent runs must use independent servers and ports.
 
 ## Management and persistent CLI checks
 
@@ -333,9 +263,13 @@ python3 -m unittest discover -s tests/docker -p 'test_*.py'
 python3 tests/web/test_browser.py --gateway build/src/tak-gateway -v
 ```
 
-Browser checks need Python Playwright and Chromium. They are test tooling only;
-the shipped web interface has no Node.js or browser-driver dependency. The
-browser script also exercises mock-backed validation, conflicts and safe text
-rendering; supplying `--gateway` enables real-server restart/upload workflows.
-Docker bootstrap variables are first-boot seeds, so tests must use isolated
+CLI checks require Python 3.11 or newer. CLI and container-entrypoint checks
+use POSIX signals and shell behavior; CI runs them once on Linux.
+
+Optional browser checks need Python Playwright and Chromium. They are test
+tooling only; the shipped web interface has no Node.js or browser-driver
+dependency. The browser script also exercises mock-backed validation,
+conflicts and safe text rendering; supplying `--gateway` enables real-server
+restart/upload workflows.
+Docker environment settings are first-boot seeds, so tests must use isolated
 state directories rather than modifying an operator's saved configuration.

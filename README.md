@@ -6,10 +6,8 @@ CoT events for TCP, UDP, and platform named-pipe consumers.
 
 The procedural C++17 implementation exposes C11 and C++17 headers and a
 foreground `tak-gateway` executable. Native and Cucumber suites exercise the
-public contracts. Live Docker checks against official TAK Server
-5.7-RELEASE-14 verify REST-created mission notifications through both XML/TLS
-and negotiated Protobuf v1 ingress to framed XML output. Native Windows
-behavior has not been verified.
+public contracts, with optional browser checks for the management interface.
+Native Windows behavior has not been verified.
 
 The full contract includes XML preservation, TAK v1 Protobuf conversion with
 explicit opaque-preservation/rejection policy, authenticated sessions and
@@ -22,9 +20,8 @@ Delivery is live and best effort, with duplicates retained and no durable replay
 - [Public API and configuration](docs/api.md): C11/procedural C++17 contracts,
   lifecycle, TOML schema, and status snapshots.
 - [Research](docs/research.md): pinned protocol, codec, and server evidence.
-- [Testing](docs/testing.md): build selections, product suites, and infrastructure.
-- [TAK Server harness](tests/tak_server/README.md): source build, verified mTLS
-  REST-to-CoT smoke test, and optional gateway output verification.
+- [Testing](docs/testing.md): build selections, native and Cucumber suites,
+  and optional browser checks.
 
 ## Build and run contract tests
 
@@ -39,8 +36,8 @@ ctest --preset default
 
 The build checks both header language interfaces and runs the native tests.
 OpenSSL, c-ares, Expat, miniz, CivetWeb, yyjson, TOML parsing and the CoT codec
-are acquired through
-CPM. Building OpenSSL from source requires Perl and Make (nmake on Windows).
+are acquired through CPM. Building OpenSSL from source requires Perl and Make
+(nmake on Windows).
 For a local build, `TG_USE_SYSTEM_OPENSSL=ON` selects an installed OpenSSL 3;
 put environment-specific settings in ignored `CMakeUserPresets.json`.
 
@@ -50,12 +47,12 @@ Acceptance testing also needs Ruby, Bundler, and `patch`:
 bundle install
 cmake --preset acceptance
 cmake --build --preset acceptance
-ctest --preset acceptance -L infrastructure
-ctest --preset acceptance -L '^(unit|acceptance)$'
+ctest --preset acceptance
 ```
 
-Runner infrastructure and populated product suites must pass. Native Cucumber
-steps call the same public library used by the executable.
+Native Cucumber steps call the same public library used by the executable.
+See the testing guide for focused runs and optional CLI, container-entrypoint,
+and browser checks.
 
 ## Configure once, then run
 
@@ -147,35 +144,8 @@ look for protocol offers or authorized events. See the
 [output framing contract](docs/api.md#delivery-and-stream-boundaries).
 Ctrl-C stops intake and allows a two-second drain.
 
-For a local TAK Server and gateway stack with persistent settings, see the
-[Docker Compose quickstart](docker/README.md).
-
-## Docker TAK Server harness
-
-On native Linux with Docker Engine, Compose v2, BuildKit, and Python 3.9+:
-
-```sh
-python3 -m unittest discover -s tests/tak_server -p 'test_*.py'
-python3 tests/tak_server/harness.py build
-python3 tests/tak_server/harness.py run --skip-build
-```
-
-The harness builds pinned official TAK Server source, provisions isolated
-PostGIS and fresh test PKI, creates a mission through verified mTLS REST, and
-checks the resulting CoT notification on an authenticated XML/TLS subscription.
-It removes its own mission and disposable fixture resources afterward.
-
-Verify the gateway's TCP records using either ingress encoding:
-
-```sh
-python3 tests/tak_server/harness.py run --skip-build \
-  --gateway "$PWD/build/src/tak-gateway"
-python3 tests/tak_server/harness.py run --skip-build \
-  --gateway "$PWD/build/src/tak-gateway" --gateway-protocol protobuf
-```
-
-See the harness guide for persistent fixtures, provenance, trust configuration,
-and cleanup.
+For a gateway container with persistent settings and an existing TAK Server,
+see the [Docker Compose quickstart](docker/README.md).
 
 ## Contributing
 

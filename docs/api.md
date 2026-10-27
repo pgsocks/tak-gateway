@@ -373,11 +373,11 @@ Its optional display `name` defaults to `id`.
 POSIX output rejects regular files, symlinks and incompatible pipe objects,
 uses nonblocking operations, and handles missing readers/EPIPE independently.
 Require one writer and consumer. Windows uses local byte-mode pipes, restricted
-security descriptors and asynchronous I/O, verified separately. A Linux FIFO
-is not a native Windows named pipe. The first Docker gate uses TCP records;
-platform support requires its own acceptance tests before a support claim.
+security descriptors and asynchronous I/O. A Linux FIFO is not a native
+Windows named pipe; platform support requires its own acceptance tests before
+a support claim.
 
-Minimal fixture configuration:
+Minimal TLS-to-TCP configuration:
 
 ```toml
 version = 1
@@ -457,14 +457,11 @@ and is more specific than an arbitrary control count. A listener's
 Connect/pipe availability requires an established writer. Session counters
 reset per connection; reconnect and output loss/completion counts accumulate.
 
-The Docker gate waits for input `fixture` to be `XML_ACTIVE` with
-`protocol_offer_received=true`, confirms output `capture` is available,
-and connects the consumer. It then makes the authenticated, bodyless
-`PUT /Marti/api/missions/{unique-name}` request. The server generates the event
-UID; the resulting u32be XML must contain a mission change whose mission name
-matches that unique name and whose type is `CREATE`. REST success alone does
-not establish delivery, and the fixture does not assert a caller-chosen root
-event UID.
+Live delivery verification requires a separately configured TAK Server and a
+connected output consumer. For the example above, confirm input `fixture` is
+`XML_ACTIVE` and output `capture` is available, then trigger a known event and
+verify its contents in the framed XML output. REST success and runtime
+readiness alone do not establish event delivery.
 
 Stop closes sources/leaves groups, then drains through subsequent polls until
 the monotonic deadline. Zero closes immediately; repeats never extend the
@@ -532,10 +529,11 @@ precedents; Expat also provides XML validation. Reporting consumed input and ret
 original spans avoids reconstructing XML through an event callback model.
 
 Header compilation checks language compatibility. Native contract tests and
-Cucumber scenarios exercise the implementation. Captured official-server
-notifications verify REST-triggered delivery through XML/TLS and negotiated
-Protobuf v1 to the gateway's TCP XML output. These checks do not establish native
-Windows or full deployment support. See the [testing guide](testing.md).
+Cucumber scenarios exercise the implementation. Live TAK Server delivery
+through XML/TLS and negotiated Protobuf v1 requires verification against a
+separately configured server. The local suites alone do not establish live
+server interoperability, native Windows behavior or full deployment support.
+See the [testing guide](testing.md).
 
 [cot-api]: https://github.com/pgsocks/cot/blob/a216ae386e8652ccb714bd6abf14ffd5333ff867/docs/api.md
 [protocol]: https://github.com/TAK-Product-Center/atak-civ/blob/9f6893dd657feacc35ec5de03dad721c2e44170e/commoncommo/core/impl/protobuf/protocol.txt

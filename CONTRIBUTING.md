@@ -100,12 +100,8 @@ The [testing guide](docs/testing.md) describes local customization.
 
 # Testing
 
-All infrastructure regressions and populated product suites must pass. An
-enabled product suite with no cases or selected scenarios is an error. The
-unchanged template intentionally has no product coverage; when maintaining
-the template, verify those failures as expected results rather than adding
-placeholder product tests. Adopted projects must add coverage for enabled
-suites or explicitly disable them.
+All native unit tests and Cucumber acceptance scenarios must pass. An
+acceptance run selecting no scenarios is an error.
 
 Before review, configure and build the default unit suite and the opt-in
 acceptance suite, then run CTest with both enabled:
@@ -114,14 +110,13 @@ acceptance suite, then run CTest with both enabled:
 bundle install
 cmake --preset acceptance
 cmake --build --preset acceptance
-ctest --preset acceptance -L infrastructure
-ctest --preset acceptance -L '^(unit|acceptance)$'
+ctest --preset acceptance
 ```
 
 Also check `git diff --check` and the code style and dependency rules above.
-For build or runner changes, verify the `default`, `acceptance`,
-`acceptance-only`, `no-suites`, and `no-tests` presets, including failure
-propagation and cleanup.
+For build or runner changes, configure, build, and test the `default`,
+`acceptance`, and `no-tests` presets. Verify relevant acceptance failure
+propagation and child-process cleanup.
 The [testing guide](docs/testing.md) describes prerequisites and commands.
 
 Unit tests under `tests/unit/` check public API contracts, boundary and error
@@ -135,9 +130,5 @@ Revise expectations when intended behavior changes. Refactors retain existing
 expectations, and bugs require implementation fixes. Remove tests only when
 behavior is intentionally retired or equivalent coverage replaces it; explain
 the reason and remove unused steps and fixtures. Keep scenarios isolated and
-focused on outcomes. The initial scaffolding has no unit cases or acceptance
-scenarios, so both enabled product suites initially fail. Infrastructure
-fixtures under `tests/infrastructure/` verify runner behavior and must not be
-counted as product cases or scenarios. CI runs these regressions before product
-tests on each supported compiler configuration. Keep infrastructure fixture
-sources and features outside product discovery.
+focused on outcomes. CI runs native and acceptance coverage on each supported
+compiler configuration.

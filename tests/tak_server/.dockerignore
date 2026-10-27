@@ -1,5 +1,0 @@
-*
-!Dockerfile.source
-!source_build.py
-!fixture-entrypoint.sh
-!configure.py

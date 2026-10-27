@@ -407,13 +407,13 @@ cores, and post-expansion size checks. Delivery tests force short writes,
 full queues, dead sinks, duplicates, UDP oversize, and incomplete EOF.
 
 TLS certificate failures, OS multicast/FIFO behavior, actual server routing,
-and deployment supervision require adapter/integration tests. The official
-[TAK Server harness](../tests/tak_server/) builds the pinned source and uses
-an authenticated REST mission operation to provoke server-generated CoT,
-then correlates the resulting event on a TLS subscriber or gateway output.
-HTTP success alone is insufficient. Live gateway checks cover XML/TLS and
-negotiated Protobuf v1. Fixed Protobuf endpoints, password profiles, and native
-Windows pipes require separate live acceptance work.
+and deployment supervision require adapter/integration tests. Live server
+verification uses an independently configured TAK Server: provoke a known
+event, then correlate it on the gateway's framed output. An authenticated REST
+mission operation is one possible trigger; HTTP success alone is insufficient.
+The repository does not provision a server or maintain a live-server harness.
+XML/TLS, negotiated and fixed Protobuf, password profiles, and native Windows
+pipes require verification in their deployment environments.
 
 The implementation composes output framing and XML preservation, UDP/multicast
 and authenticated TLS, TAK v1 negotiation, envelope separation, conversion and
