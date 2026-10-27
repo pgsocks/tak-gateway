@@ -19,7 +19,9 @@ It decodes certificate stores in a private temporary directory, then the shared
 configuration store promotes referenced credentials to durable private assets.
 Temporary files and the raw upload are discarded. Persisted credentials remain
 available across restarts; treat the state directory as private key material.
-TLS server certificates and hostnames remain verified.
+TLS server certificates remain verified against the package trust store.
+Imported connections follow ATAK streaming behavior without matching the
+certificate name against the connection hostname.
 
 ## Uploaded package layout
 
@@ -86,6 +88,21 @@ For a transport bundle without a referenced identity, a uniquely available
 private-key PKCS#12 store can supply it. Its password is the configured client
 password, falling back to the packaged CA password. Multiple eligible
 identities require an unambiguous package rather than automatic selection.
+
+Imported profiles explicitly set `tls.verify_hostname=false`, matching
+[ATAK streaming certificate validation][atak-streaming-tls]. Certificate-chain,
+validity, and purpose checks remain enabled. The connection hostname remains
+the address used for DNS and SNI; no certificate name is guessed or fetched
+during import. Ordinary manual configurations retain hostname verification.
+Enable **Verify server hostname** in the connection editor, or set
+`inputs[0].tls.verify_hostname=true`, when an expected certificate name should
+also be checked.
+
+Existing saved profiles retain their verification policy. To apply ATAK
+behavior to an earlier import, reimport it or clear **Verify server hostname**
+in its connection editor.
+
+[atak-streaming-tls]: https://github.com/TAK-Product-Center/atak-civ/blob/9f6893dd657feacc35ec5de03dad721c2e44170e/commoncommo/core/impl/streamingsocketmanagement.cpp#L1827-L1844
 
 The supplied inner package requests enrollment and lacks a client identity.
 The outer bundle supplies that identity in `admin.p12`, so the importer can

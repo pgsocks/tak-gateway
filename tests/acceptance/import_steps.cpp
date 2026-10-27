@@ -73,6 +73,21 @@ THEN("^the gateway can prepare the imported TLS source$")
 	EXPECT_NE(string(snapshot.value).find("atak-0"), std::string::npos);
 }
 
+THEN("^its TLS input verifies the package CA without hostname matching$")
+{
+	ScenarioScope<ImportContext> context;
+	Buffer document;
+
+	ASSERT_EQ(context->result, TG_OK);
+	ASSERT_EQ(tg_config_redacted(context->config.value, &document.value,
+		nullptr), TG_OK);
+	EXPECT_NE(string(document.value).find("verify_hostname = false"),
+		std::string::npos);
+	EXPECT_NE(string(document.value).find("ca_file = "), std::string::npos);
+	EXPECT_NE(string(context->imported.toml.value).find(
+		"verify_hostname = false"), std::string::npos);
+}
+
 THEN("^no package password appears in its configuration or status$")
 {
 	ScenarioScope<ImportContext> context;

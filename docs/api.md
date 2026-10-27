@@ -312,7 +312,8 @@ it implicitly or falls back after TLS failure.
 | `prefer` | `xml` (default), `protobuf` | Negotiated mode only |
 | `version` | Required `1` for protobuf-only | Omit in other modes |
 | `tls.ca_file` | Required path | Chain verification required |
-| `tls.server_name` | Defaults to host | Verification identity/SNI separate from address |
+| `tls.server_name` | Defaults to host | SNI and optional hostname-verification identity, separate from address |
+| `tls.verify_hostname` | `true` | Match the expected DNS name/IP as well as verifying CA trust; ATAK ZIP imports set `false` |
 | `tls.cert_file` / `tls.key_file` | Optional paired PEM paths | Mutual TLS |
 | `tls.key_password_file` / `tls.key_password_env` | Optional, mutually exclusive | Protected PEM passphrase |
 | `tls.pkcs12_file` | Optional path | Alternative to PEM pair |
@@ -323,6 +324,11 @@ it implicitly or falls back after TLS failure.
 | `maintenance.ping_interval_ms` | 0 (disabled) | Positive with a positive timeout |
 | `maintenance.ping_timeout_ms` | 0 (disabled) | Both ping settings zero or positive |
 | `maintenance.identity_xml_file` | Optional nonsecret path | Explicit UID-matching event |
+
+CA-chain, validity, and certificate-purpose verification remain required even
+when `tls.verify_hostname=false`. Imported ATAK profiles use this policy to
+match ATAK streaming behavior; ordinary configurations default to hostname
+verification. An explicit `tls.server_name` still selects SNI.
 
 PEM and PKCS#12 profiles cannot combine. Client certificates and streaming
 password authentication can coexist. Reject literal secrets, unknown insecure

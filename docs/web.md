@@ -34,6 +34,13 @@ Blank password inputs retain their existing protected values. Use explicit
 replacement/removal controls to change secrets; their contents are never
 returned to the browser.
 
+**Verify server hostname** defaults on for manual connections. ATAK ZIP imports
+leave it off to match ATAK certificate trust: the server certificate must pass
+CA-chain, validity, and purpose checks without matching its name to the
+connection address. **Certificate server name** selects SNI and, when hostname
+verification is enabled, the expected certificate identity. Saved profiles keep
+this selection through edits and restarts.
+
 ZIP import validates the archive and displays an editable preview before
 confirmation. It supports the existing standard and nested ATAK package
 formats. Package passwords and client keys are used privately, not displayed.

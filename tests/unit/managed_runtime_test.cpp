@@ -59,6 +59,7 @@ TEST(ManagedConfiguration, ExportPreservesProtectedReferencesAndNames)
 	std::string text = "version=1\n[[inputs]]\nid='tak'\n"
 		"name='Example server'\nkind='tls'\nhost='example.invalid'\n"
 		"uid='reader'\n[inputs.tls]\nca_file='ca.pem'\n"
+		"verify_hostname=false\n"
 		"cert_file='client.pem'\nkey_file='client.key'\n"
 		"key_password_env='MANAGED_TEST_SECRET_REFERENCE'\n"
 		"[[outputs]]\nid='sink'\nname='Local'\nkind='tcp'\n"
@@ -76,6 +77,7 @@ TEST(ManagedConfiguration, ExportPreservesProtectedReferencesAndNames)
 		std::string::npos);
 	ASSERT_EQ(managed_parse(string(full.value), restored), TG_OK);
 	EXPECT_STREQ(restored.value->inputs[0].name, "Example server");
+	EXPECT_FALSE(restored.value->inputs[0].verify_hostname);
 	EXPECT_STREQ(restored.value->outputs[0].name, "Local");
 	EXPECT_STREQ(restored.value->inputs[0].key_file,
 		config.value->inputs[0].key_file);
@@ -237,9 +239,12 @@ struct DiagnosticServer {
 	uint16_t port = 0;
 	std::string ca_path;
 	std::string password_path;
+	std::string event;
+	const char *ca_name = "Diagnostics CA";
 	bool read_auth = false;
 
-	bool prepare(bool expired, bool require_certificate)
+	bool prepare(bool expired, bool require_certificate,
+		const char *hostname = "127.0.0.1")
 	{
 		using namespace import_fixtures;
 
@@ -248,14 +253,15 @@ struct DiagnosticServer {
 			return false;
 		EVP_PKEY *ca_key = key();
 		EVP_PKEY *server_key = key();
-		X509 *ca = ca_key ? certificate(ca_key, "Diagnostics CA",
+		X509 *ca = ca_key ? certificate(ca_key, ca_name,
 			ca_key,
 			nullptr, true) : nullptr;
 		X509 *server = ca && server_key ? certificate(server_key,
-			"127.0.0.1", ca_key, ca, false) : nullptr;
+			hostname, ca_key, ca, false) : nullptr;
+		std::string identity = !strcmp(hostname, "127.0.0.1") ?
+			"IP:127.0.0.1" : std::string("DNS:") + hostname;
 		X509_EXTENSION *san = X509V3_EXT_conf_nid(nullptr, nullptr,
-			NID_subject_alt_name, const_cast<char *>(
-				"IP:127.0.0.1"));
+			NID_subject_alt_name, identity.data());
 		bool ok = ca && server && san;
 
 		if (ok) {
@@ -316,6 +322,9 @@ struct DiagnosticServer {
 				SSL_accept(ssl) == 1;
 
 			if (accepted) {
+				if (!event.empty())
+					SSL_write(ssl, event.data(),
+						(int)event.size());
 				if (read_auth) {
 					char bytes[4096];
 
@@ -373,6 +382,103 @@ static std::string await_diagnostic(Runtime &runtime, const std::string &code)
 }
 
 } /* namespace */
+
+TEST(ManagedDiagnostics, DefaultTlsPolicyRejectsAnotherCertificateName)
+{
+	DiagnosticServer server;
+
+	ASSERT_TRUE(server.prepare(false, false, "takserver"));
+	server.start(false);
+	Config config;
+	Runtime runtime;
+
+	ASSERT_EQ(managed_parse(server.profile(false), config), TG_OK);
+	ASSERT_EQ(tg_runtime_create_managed(config.value, &runtime.value,
+		nullptr), TG_OK);
+	EXPECT_FALSE(await_diagnostic(runtime,
+		"tls-server-hostname-mismatch").empty());
+}
+
+TEST(ManagedDiagnostics, AtakTlsPolicyReceivesEventsWithAnotherCertificateName)
+{
+	DiagnosticServer server;
+
+	ASSERT_TRUE(server.prepare(false, false, "takserver"));
+	server.event = fixtures::extended_xml();
+	server.start(false);
+	Config config;
+	Runtime runtime;
+
+	ASSERT_EQ(managed_parse(server.profile(false) +
+		"verify_hostname=false\n", config), TG_OK);
+	ASSERT_EQ(tg_runtime_create_managed(config.value, &runtime.value,
+		nullptr), TG_OK);
+	EXPECT_FALSE(await_diagnostic(runtime,
+		"\"events_received\":1").empty());
+}
+
+TEST(ManagedDiagnostics, AtakTlsPolicyRejectsAnExpiredServerCertificate)
+{
+	DiagnosticServer server;
+
+	ASSERT_TRUE(server.prepare(true, false, "takserver"));
+	server.start(false);
+	Config config;
+	Runtime runtime;
+
+	ASSERT_EQ(managed_parse(server.profile(false) +
+		"verify_hostname=false\n", config), TG_OK);
+	ASSERT_EQ(tg_runtime_create_managed(config.value, &runtime.value,
+		nullptr), TG_OK);
+	EXPECT_FALSE(await_diagnostic(runtime,
+		"tls-server-certificate-expired").empty());
+}
+
+TEST(ManagedDiagnostics, AtakTlsPolicyRejectsAnUntrustedServerCertificate)
+{
+	DiagnosticServer server, unrelated;
+
+	ASSERT_TRUE(server.prepare(false, false, "takserver"));
+	unrelated.ca_name = "Unrelated CA";
+	ASSERT_TRUE(unrelated.prepare(false, false));
+	server.start(false);
+	Config config;
+	Runtime runtime;
+	std::string text = server.profile(false) + "verify_hostname=false\n";
+	size_t at = text.find(server.ca_path);
+
+	ASSERT_NE(at, std::string::npos);
+	text.replace(at, server.ca_path.size(), unrelated.ca_path);
+	ASSERT_EQ(managed_parse(text, config), TG_OK);
+	ASSERT_EQ(tg_runtime_create_managed(config.value, &runtime.value,
+		nullptr), TG_OK);
+	EXPECT_FALSE(await_diagnostic(runtime,
+		"tls-server-certificate-untrusted").empty());
+}
+
+TEST(ManagedRuntime, ChangingTlsHostnameVerificationReplacesTheSource)
+{
+	DiagnosticServer server;
+
+	ASSERT_TRUE(server.prepare(false, false));
+	Config initial, candidate;
+	Runtime runtime;
+
+	ASSERT_EQ(managed_parse(server.profile(false), initial), TG_OK);
+	ASSERT_EQ(managed_parse(server.profile(false) +
+		"verify_hostname=false\n", candidate), TG_OK);
+	ASSERT_EQ(tg_runtime_create_managed(initial.value, &runtime.value,
+		nullptr), TG_OK);
+	ASSERT_EQ(tg_runtime_apply_config(runtime.value, candidate.value,
+		nullptr), TG_OK);
+	ASSERT_EQ(tg_runtime_poll(runtime.value, 0), TG_OK);
+	Buffer snapshot;
+
+	ASSERT_EQ(tg_runtime_snapshot(runtime.value, &snapshot.value),
+		TG_OK);
+	EXPECT_NE(string(snapshot.value).find("\"profile_revision\":2"),
+		std::string::npos);
+}
 
 TEST(ManagedDiagnostics, ExpiredServerCertificateHasSpecificVerificationCode)
 {

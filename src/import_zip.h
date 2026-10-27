@@ -20,6 +20,8 @@ bool tg_import_files_contains(const tg_import_files *files, const char *path);
  * is not performed. An outer sibling identity is used only when exactly one
  * decryptable private-key store is available. Passwords come from preferences.
  * Imported inputs use certificate authentication and XML-only streaming.
+ * Their TLS verification follows ATAK: validate the packaged CA chain without
+ * hostname matching. Callers may enable tls.verify_hostname after import.
  *
  * Reads at most 16 MiB of archive data, accepts one nested package, at most
  * 256 entries per archive, 32 streams, and 1 MiB XML documents. Archive paths,

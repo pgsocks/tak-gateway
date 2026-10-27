@@ -1070,7 +1070,8 @@ static tg_status import_stream(xml_reader *preferences, unsigned index,
 			"port = %u\n", index, index, port) ||
 			!emit(text, "name", name && *name ? name : host) ||
 			!emit(text, "host", host) ||
-			!tg_text(text, "[inputs.tls]\n") ||
+			!tg_text(text, "[inputs.tls]\n"
+				"verify_hostname = false\n") ||
 			!emit(text, "ca_file", ca_path) ||
 			!emit(text, "cert_file", cert_path) ||
 			!emit(text, "key_file", key_path))

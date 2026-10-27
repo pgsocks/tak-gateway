@@ -315,7 +315,7 @@ static void read_input(reader *r, toml_table_t *t, size_t index)
 	char sp[96];
 	snprintf(sp, sizeof(sp), "%s.tls", p);
 	if (!schema(r, ssl,
-		    "ca_file server_name cert_file key_file "
+		    "ca_file server_name verify_hostname cert_file key_file "
 		    "key_password_file key_password_env pkcs12_file "
 		    "pkcs12_password_file "
 		    "pkcs12_password_env",
@@ -323,6 +323,7 @@ static void read_input(reader *r, toml_table_t *t, size_t index)
 		return;
 	in->ca_file = string_in(r, ssl, "ca_file", sp, nullptr, true);
 	in->server_name = string_in(r, ssl, "server_name", sp, in->host);
+	in->verify_hostname = boolean_in(r, ssl, "verify_hostname", sp, true);
 	in->cert_file = string_in(r, ssl, "cert_file", sp, nullptr, true);
 	in->key_file = string_in(r, ssl, "key_file", sp, nullptr, true);
 	in->pkcs12_file = string_in(r, ssl, "pkcs12_file", sp, nullptr, true);
@@ -868,6 +869,8 @@ static bool serialize_input(tg_vec *out, const tg_input_config *in,
 				   s->preference == TG_PREFER_XML ? "xml"
 								  : "protobuf");
 	ok = ok && tg_text(out, "\n[inputs.tls]\n") &&
+	     tg_printf(out, "verify_hostname = %s\n",
+		in->verify_hostname ? "true" : "false") &&
 	     setting(out, redact, "ca_file", in->ca_file) &&
 	     setting(out, redact, "server_name", in->server_name) &&
 	     setting(out, redact, "cert_file", in->cert_file) &&

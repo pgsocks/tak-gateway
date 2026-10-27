@@ -19,6 +19,8 @@ struct tg_input_config {
 	tg_datagram_mode encoding;
 	tg_session_options session;
 	const char *ca_file;
+	/* Verify the CA chain and, when true, also match server_name. */
+	bool verify_hostname;
 	const char *cert_file;
 	const char *key_file;
 	const char *key_password_file;

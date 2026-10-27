@@ -350,9 +350,14 @@ function paintInput(parent) {
 	field(endpoint, "callsign", "Callsign", { placeholder: "Defaults to gateway UID" });
 	field(endpoint, "protocol", "Protocol", { value: "xml-only", choices: [["xml-only", "XML only"], ["negotiated", "Negotiate XML / Protobuf"], ["protobuf-only", "Protobuf v1 only"]], rebuild: true });
 	if (values.protocol === "negotiated") field(endpoint, "prefer", "Preferred protocol", { value: "xml", choices: [["xml", "XML"], ["protobuf", "Protobuf"]] });
-	const tls = section(parent, "Trust and client identity", "Server certificate and hostname verification remain enabled. Existing credentials are kept unless you replace them.");
+	const tls = section(parent, "Trust and client identity", "Server certificates are verified against the configured CA trust. Existing credentials are kept unless you replace them.");
+	const verifyLabel = node("label", null, "checkbox-label");
+	const verify = node("input"); verify.type = "checkbox"; verify.name = "tls.verify_hostname";
+	verify.checked = values["tls.verify_hostname"] !== false;
+	verify.addEventListener("change", () => { values["tls.verify_hostname"] = verify.checked; });
+	verifyLabel.append(verify, node("span", "Verify server hostname")); tls.append(verifyLabel);
 	const credentials = grid(tls);
-	field(credentials, "tls.server_name", "Certificate server name", { placeholder: "Defaults to server hostname" });
+	field(credentials, "tls.server_name", "Certificate server name", { placeholder: "Defaults to server hostname", help: "Used for SNI and, when enabled, certificate hostname verification. ATAK imports verify package CA trust without hostname matching." });
 	field(credentials, "ca_upload", "CA trust certificate (PEM)", { type: "file", accept: ".pem,.crt,.cer", help: values["tls.has_ca"] ? "A CA trust certificate is already configured." : "Upload the CA that signs the TAK server certificate." });
 	field(credentials, "identity_mode", "Client identity", { choices: [["none", "No client certificate"], ["pem", "PEM certificate and key"], ["pkcs12", "PKCS#12 certificate bundle"]], rebuild: true });
 	if (values.identity_mode === "pem") {
@@ -446,6 +451,7 @@ function payload() {
 		if (result.protocol === "protobuf-only") result.version = 1;
 		result.identity_mode = values.identity_mode || "none";
 		result.tls = {};
+		result.tls.verify_hostname = values["tls.verify_hostname"] !== false;
 		copy(["server_name", "ca_file"], result.tls, "tls.");
 		result.tls.server_name = values["tls.server_name"] || null;
 		if (result.identity_mode === "pem") copy(["cert_file", "key_file", "key_password", "key_password_env"], result.tls, "tls.");

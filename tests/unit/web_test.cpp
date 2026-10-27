@@ -491,7 +491,8 @@ TEST(WebManagement, OmittedCredentialEditsRetainPrivateManagedAssets)
 		"\"kind\":\"tls\",\"host\":\"127.0.0.1\",\"port\":" + port + ","
 		"\"uid\":\"web-reader\",\"callsign\":null,"
 		"\"protocol\":\"xml-only\",\"identity_mode\":\"pkcs12\","
-		"\"tls\":{\"server_name\":null,\"has_ca\":false,\"ca_asset\":" +
+		"\"tls\":{\"server_name\":null,\"verify_hostname\":false,"
+		"\"has_ca\":false,\"ca_asset\":" +
 		quote(ca_id) + ",\"pkcs12_asset\":" + quote(client_id) +
 		",\"pkcs12_password\":\"test-only-secret\"}}";
 	Response accepted = gateway.request("POST", "/api/inputs",
@@ -532,6 +533,8 @@ TEST(WebManagement, OmittedCredentialEditsRetainPrivateManagedAssets)
 	ASSERT_EQ(response.status, 200);
 	EXPECT_EQ(text(field(input, "name")), "Renamed reader");
 	EXPECT_TRUE(yyjson_get_bool(field(tls, "has_ca")));
+	ASSERT_TRUE(yyjson_is_bool(field(tls, "verify_hostname")));
+	EXPECT_FALSE(yyjson_get_bool(field(tls, "verify_hostname")));
 	EXPECT_TRUE(yyjson_get_bool(field(tls, "has_pkcs12")) ||
 		(yyjson_get_bool(field(tls, "has_certificate")) &&
 		 yyjson_get_bool(field(tls, "has_key"))));
@@ -554,6 +557,7 @@ TEST(WebManagement, OmittedCredentialEditsRetainPrivateManagedAssets)
 	const tg_input_config &saved_input = saved.value->inputs[0];
 
 	EXPECT_STREQ(saved_input.server_name, "127.0.0.1");
+	EXPECT_FALSE(saved_input.verify_hostname);
 	EVP_PKEY *private_key = nullptr;
 	X509 *certificate = nullptr;
 

@@ -1,4 +1,5 @@
 #include "contract_support.hpp"
+#include "../../src/config_internal.h"
 #include <chrono>
 #include <cstring>
 #include <filesystem>
@@ -266,6 +267,42 @@ TEST(Configuration, KeepsTlsConnectionAddressSeparateFromServerIdentity)
 	EXPECT_NE(text.find("127.0.0.1"), std::string::npos);
 	EXPECT_NE(text.find("takserver"), std::string::npos);
 	EXPECT_NE(text.find("server_name"), std::string::npos);
+}
+
+TEST(Configuration, TlsHostnameVerificationDefaultsOnAndRoundTrips)
+{
+	Config defaults;
+
+	ASSERT_EQ(parse(tls_config(), defaults), TG_OK);
+	EXPECT_TRUE(defaults.value->inputs[0].verify_hostname);
+	for (bool enabled : {false, true}) {
+		Config config, restored;
+		Buffer document;
+		std::string value = enabled ? "true" : "false";
+
+		ASSERT_EQ(parse(tls_config("verify_hostname = " + value +
+			"\n"), config), TG_OK);
+		EXPECT_EQ(config.value->inputs[0].verify_hostname, enabled);
+		ASSERT_EQ(tg_config_redacted(config.value, &document.value,
+			nullptr), TG_OK);
+		EXPECT_NE(string(document.value).find("verify_hostname = " +
+			value), std::string::npos);
+		ASSERT_EQ(parse(string(document.value), restored), TG_OK);
+		EXPECT_EQ(restored.value->inputs[0].verify_hostname, enabled);
+	}
+}
+
+TEST(Configuration, RejectsNonbooleanTlsHostnameVerification)
+{
+	for (const char *value : {"'false'", "0", "[]", "{}"}) {
+		Config config;
+		tg_diagnostic diagnostic{};
+
+		EXPECT_EQ(parse(tls_config(std::string("verify_hostname = ") +
+			value + "\n"), config, &diagnostic), TG_INVALID);
+		EXPECT_EQ(config.value, nullptr);
+		EXPECT_STREQ(diagnostic.key, "inputs[0].tls.verify_hostname");
+	}
 }
 
 TEST(Configuration, RejectsUnpairedOrMixedClientCredentialFormats)

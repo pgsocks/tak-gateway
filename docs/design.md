@@ -145,8 +145,12 @@ protocol's capability-announcement state machine and is a separate feature.
 ## Authentication and protocol state
 
 TLS authentication and TAK streaming authentication solve separate problems.
-Verify the server chain and expected hostname/identity, with no automatic
-certificate bypass. Support PEM and protected PKCS#12 client credentials.
+Verify the server chain, validity, and certificate purpose for every TLS
+profile. Ordinary configurations also verify the expected hostname/identity.
+ATAK ZIP imports explicitly select CA trust without hostname matching,
+following ATAK streaming behavior; this is a saved per-profile policy, never
+an automatic fallback after a verification failure. Support PEM and protected
+PKCS#12 client credentials.
 Where configured, the XML username/password/UID/callsign preamble is the first
 client application write, including before a negotiation request. A profile
 may require both mechanisms. Merely sending the preamble does not establish

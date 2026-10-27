@@ -13,6 +13,11 @@ Feature: Import ATAK server configuration packages
     When its imported input is composed with a local TCP output
     Then the gateway can prepare the imported TLS source
 
+  Scenario: Preserve ATAK certificate trust without matching the address
+    Given an ATAK package with a client certificate and trusted CA
+    When its imported input is composed with a local TCP output
+    Then its TLS input verifies the package CA without hostname matching
+
   Scenario: Refuse an enrollment package without client credentials
     Given an enrollment package without a supplied client identity
     When the ATAK package import is attempted

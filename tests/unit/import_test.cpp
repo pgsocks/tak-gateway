@@ -73,6 +73,9 @@ TEST(ZipImport, WrappedMissionPackageProducesUsableCertificateInput)
 	EXPECT_STREQ(input.host, "tak.example.invalid");
 	EXPECT_EQ(input.port, 28089);
 	EXPECT_EQ(input.session.protocol, TG_PROTOCOL_XML_ONLY);
+	EXPECT_FALSE(input.verify_hostname);
+	EXPECT_NE(string(imported.toml.value).find("verify_hostname = false"),
+		std::string::npos);
 	EXPECT_EQ(input.username, nullptr);
 	EXPECT_EQ(input.password_file, nullptr);
 	EXPECT_NE(input.ca_file, nullptr);
@@ -101,6 +104,7 @@ TEST(ZipImport, TransportWrapperSuppliesUniqueIdentityForEnrollmentPackage)
 	ASSERT_EQ(parse_import(imported, config), TG_OK);
 	ASSERT_EQ(config.value->input_count, 1u);
 	EXPECT_STREQ(config.value->inputs[0].host, "tak.example.invalid");
+	EXPECT_FALSE(config.value->inputs[0].verify_hostname);
 	EXPECT_EQ(config.value->inputs[0].username, nullptr);
 	ASSERT_EQ(tg_config_validate(config.value, nullptr), TG_OK);
 	Runtime runtime;

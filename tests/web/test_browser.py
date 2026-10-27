@@ -316,6 +316,30 @@ class BrowserContract(unittest.TestCase):
         self.page.get_by_text("Saved revision 2; active revision 1. Output bind failed", exact=True).wait_for()
         self.assertEqual(self.page.get_by_label("Display name", exact=True).input_value(), "Unsaved form values")
 
+    def test_imported_hostname_verification_can_be_preserved_and_enabled(self):
+        self.server.data["config"]["inputs"] = [{"id": "source", "name": "Imported TAK",
+            "kind": "tls", "host": "tak.example.invalid", "port": 28089,
+            "uid": "imported", "protocol": "xml-only", "tls": {
+                "has_ca": True, "verify_hostname": False}}]
+        self.load()
+        self.page.get_by_role("button", name="Edit", exact=True).click()
+        verification = self.page.get_by_label("Verify server hostname", exact=True)
+        self.assertFalse(verification.is_checked())
+        self.page.get_by_label("Display name", exact=True).fill("Renamed TAK")
+        self.page.get_by_role("button", name="Save and apply", exact=True).click()
+        self.page.wait_for_function("!document.querySelector('#editor-dialog').open")
+        self.assertIs(self.server.requests[-1][2]["input"]["tls"]["verify_hostname"], False)
+        self.page.get_by_role("button", name="Edit", exact=True).click()
+        self.page.get_by_label("Verify server hostname", exact=True).check()
+        self.page.get_by_role("button", name="Save and apply", exact=True).click()
+        self.page.wait_for_function("!document.querySelector('#editor-dialog').open")
+        self.assertIs(self.server.requests[-1][2]["input"]["tls"]["verify_hostname"], True)
+
+    def test_new_connections_require_hostname_verification_by_default(self):
+        self.load()
+        self.page.get_by_role("button", name="Add connection", exact=True).click()
+        self.assertTrue(self.page.get_by_label("Verify server hostname", exact=True).is_checked())
+
     def test_existing_utf8_identifier_edit_toggle_and_remove(self):
         identifier = "west/a .é"
         self.server.data["config"]["outputs"] = [{"id": identifier, "name": "Old output",
@@ -474,6 +498,32 @@ class LiveGateway(BrowserContract):
     test_saved_but_not_applied_banner_preserves_open_form = None
     test_existing_utf8_identifier_edit_toggle_and_remove = None
     test_pipe_edit_preserves_explicit_creation_setting = None
+
+    def test_imported_hostname_verification_can_be_preserved_and_enabled(self):
+        self.page.goto(self.url)
+        self.page.get_by_role("heading", name="No TAK connections yet").wait_for()
+        self.page.get_by_role("button", name="Import ZIP", exact=True).click()
+        self.page.locator("#zip-file").set_input_files(self.archive)
+        self.page.get_by_label("Display name for imported connection 1", exact=True).fill("Policy TAK")
+        self.page.get_by_role("button", name="Import connections", exact=True).click()
+        self.page.get_by_text("Policy TAK", exact=True).wait_for()
+        self.page.get_by_role("button", name="Edit", exact=True).click()
+        self.assertFalse(self.page.get_by_label("Verify server hostname", exact=True).is_checked())
+        self.page.get_by_label("Display name", exact=True).fill("Saved policy TAK")
+        self.page.get_by_role("button", name="Save and apply", exact=True).click()
+        self.wait_saved("Saved policy TAK")
+        self.stop_gateway()
+        self.start_gateway()
+        self.page.reload()
+        self.page.get_by_text("Saved policy TAK", exact=True).wait_for()
+        self.page.get_by_role("button", name="Edit", exact=True).click()
+        verification = self.page.get_by_label("Verify server hostname", exact=True)
+        self.assertFalse(verification.is_checked())
+        verification.check()
+        self.page.get_by_role("button", name="Save and apply", exact=True).click()
+        self.page.locator("#editor-dialog").wait_for(state="hidden")
+        saved = self.page.request.get(self.url + "/api/state").json()
+        self.assertIs(saved["config"]["inputs"][0]["tls"]["verify_hostname"], True)
 
     def test_real_upload_manual_edit_output_and_restart_persistence(self):
         self.page.goto(self.url)

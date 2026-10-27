@@ -810,9 +810,12 @@ static void source_tls_poll(tg_runtime *r, size_t index)
 		unsigned char address[16];
 		bool ip = inet_pton(AF_INET, in->server_name, address) == 1 ||
 			  inet_pton(AF_INET6, in->server_name, address) == 1;
-		int ok = ip ? X509_VERIFY_PARAM_set1_ip_asc(
-				      SSL_get0_param(s->ssl), in->server_name)
-			    : SSL_set1_host(s->ssl, in->server_name);
+		int ok = 1;
+
+		if (in->verify_hostname)
+			ok = ip ? X509_VERIFY_PARAM_set1_ip_asc(
+				SSL_get0_param(s->ssl), in->server_name) :
+				SSL_set1_host(s->ssl, in->server_name);
 		if (!ok || (!ip && !SSL_set_tlsext_host_name(
 					   s->ssl, in->server_name))) {
 			source_retry(s, r->now, "tls-identity");
@@ -2370,6 +2373,7 @@ static bool input_equal(const tg_input_config *a, const tg_input_config *b)
 		if (!text_equal(left[i], right[i]))
 			return false;
 	if (a->peer_count != b->peer_count || a->port != b->port ||
+		a->verify_hostname != b->verify_hostname ||
 		a->enabled != b->enabled || a->encoding != b->encoding ||
 		a->session.protocol != b->session.protocol ||
 		a->session.preference != b->session.preference ||
