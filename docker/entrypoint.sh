@@ -29,6 +29,9 @@ initialize() (
 		esac
 	done
 
+	TAK_GATEWAY_OUTPUTS=${TAK_GATEWAY_OUTPUTS-local=tcp://0.0.0.0:9000}
+	TAK_GATEWAY_WEB_BIND=${TAK_GATEWAY_WEB_BIND-0.0.0.0:8080}
+
 	set -- config --if-uninitialized --state-dir "$selected_state"
 	if [ -n "${TAK_GATEWAY_CONFIG_FILE:-}" ]; then
 		set -- "$@" --config "$TAK_GATEWAY_CONFIG_FILE"

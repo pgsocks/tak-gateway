@@ -12,9 +12,56 @@ struct CliContext {
 	Package fixture;
 	Configured configured;
 	Runtime runtime;
+	tg_web_settings web{};
 	std::string path;
 	tg_status status = TG_BAD_STATE;
 };
+
+GIVEN("^no saved gateway configuration for container first boot$")
+{
+	ScenarioScope<CliContext> context;
+
+	ASSERT_TRUE(context->fixture.prepare());
+	tg_web_settings_default(&context->web);
+}
+
+WHEN("^the container settings enable management and local TCP delivery$")
+{
+	ScenarioScope<CliContext> context;
+	const char *arguments[] = {"--output", "local=tcp://0.0.0.0:9000",
+		"--web-bind", "0.0.0.0:8080"};
+
+	context->status = tg_cli_compose({}, 4, arguments,
+		context->fixture.directory.string().c_str(), true,
+		&context->configured.config, &context->configured.files,
+		&context->web, &context->configured.diagnostic);
+}
+
+THEN("^management is enabled on all interfaces at port 8080$")
+{
+	ScenarioScope<CliContext> context;
+
+	ASSERT_EQ(context->status, TG_OK);
+	EXPECT_TRUE(context->web.enabled);
+	EXPECT_STREQ(context->web.bind, "0.0.0.0:8080");
+}
+
+THEN("^a local TCP output is configured at port 9000 with no inputs$")
+{
+	ScenarioScope<CliContext> context;
+
+	ASSERT_EQ(context->status, TG_OK);
+	ASSERT_NE(context->configured.config, nullptr);
+	EXPECT_EQ(context->configured.config->input_count, 0u);
+	ASSERT_EQ(context->configured.config->output_count, 1u);
+	const tg_output_config &output = context->configured.config->outputs[0];
+
+	EXPECT_STREQ(output.id, "local");
+	EXPECT_STREQ(output.kind, "tcp");
+	EXPECT_STREQ(output.bind, "0.0.0.0");
+	EXPECT_EQ(output.port, 9000);
+	EXPECT_EQ(output.delivery.framing, TG_FRAMING_U32BE);
+}
 
 GIVEN("^an ATAK zip and no local TOML configuration$")
 {

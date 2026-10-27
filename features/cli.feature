@@ -2,6 +2,12 @@ Feature: Configure gateway delivery from command line arguments
   A configuration file is optional when arguments describe the inputs,
   outputs, and gateway settings needed for the run.
 
+  Scenario: Prepare container first boot without a server configuration
+    Given no saved gateway configuration for container first boot
+    When the container settings enable management and local TCP delivery
+    Then management is enabled on all interfaces at port 8080
+    And a local TCP output is configured at port 9000 with no inputs
+
   Scenario: Prepare a certificate input and TCP output without TOML
     Given an ATAK zip and no local TOML configuration
     When arguments select a TCP output and bounded delivery queues

@@ -76,8 +76,48 @@ class EntrypointTests(unittest.TestCase):
             return []
         return [json.loads(line) for line in self.log.read_text().splitlines()]
 
-    def test_no_arguments_executes_run_without_initializing(self):
-        result = self.invoke()
+    def test_default_run_initializes_management_and_local_output(self):
+        for args in [(), ("run",)]:
+            with self.subTest(args=args):
+                self.log.unlink(missing_ok=True)
+                state = self.root / f"state-{len(args)}"
+                result = self.invoke(args, TAK_GATEWAY_STATE_DIR=str(state))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual([x["args"] for x in self.calls()], [
+                    ["config", "--if-uninitialized", "--state-dir", str(state),
+                     "--output", "local=tcp://0.0.0.0:9000",
+                     "--web-bind", "0.0.0.0:8080"], ["run"]])
+                self.assertTrue((state / "CURRENT").exists())
+
+    def test_explicit_environment_replaces_container_defaults(self):
+        result = self.invoke(("run",),
+                             TAK_GATEWAY_OUTPUTS="monitor=udp://127.0.0.1:9001",
+                             TAK_GATEWAY_WEB_BIND="127.0.0.1:18080")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.calls()[0]["args"], [
+            "config", "--if-uninitialized", "--state-dir", str(self.state),
+            "--output", "monitor=udp://127.0.0.1:9001",
+            "--web-bind", "127.0.0.1:18080"])
+
+    def test_empty_outputs_keeps_default_management_without_output(self):
+        result = self.invoke(("run",), TAK_GATEWAY_OUTPUTS="")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.calls()[0]["args"], [
+            "config", "--if-uninitialized", "--state-dir", str(self.state),
+            "--web-bind", "0.0.0.0:8080"])
+        self.assertTrue((self.state / "CURRENT").exists())
+
+    def test_empty_web_bind_keeps_default_output_without_management(self):
+        result = self.invoke(("run",), TAK_GATEWAY_WEB_BIND="")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.calls()[0]["args"], [
+            "config", "--if-uninitialized", "--state-dir", str(self.state),
+            "--output", "local=tcp://0.0.0.0:9000"])
+        self.assertTrue((self.state / "CURRENT").exists())
+
+    def test_explicitly_empty_defaults_do_not_seed_an_empty_store(self):
+        result = self.invoke(("run",), TAK_GATEWAY_OUTPUTS="",
+                             TAK_GATEWAY_WEB_BIND="")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual([x["args"] for x in self.calls()], [["run"]])
         self.assertFalse(self.state.exists())
@@ -105,7 +145,8 @@ class EntrypointTests(unittest.TestCase):
         self.assertEqual(self.calls()[1]["args"], ["run"])
 
     def test_empty_state_environment_uses_container_default(self):
-        result = self.invoke(("run",), TAK_GATEWAY_STATE_DIR="")
+        result = self.invoke(("run",), TAK_GATEWAY_STATE_DIR="",
+                             TAK_GATEWAY_OUTPUTS="", TAK_GATEWAY_WEB_BIND="")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.calls()[0]["state"], "/var/lib/tak-gateway")
 
@@ -113,7 +154,7 @@ class EntrypointTests(unittest.TestCase):
         self.state.mkdir()
         current = self.state / "CURRENT"
         current.write_text("GUI configuration")
-        result = self.invoke(("run",), TAK_GATEWAY_WEB_BIND="0.0.0.0:8080")
+        result = self.invoke(("run",))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(current.read_text(), "GUI configuration")
 
@@ -152,8 +193,7 @@ class EntrypointTests(unittest.TestCase):
                 self.assertFalse(self.state.exists())
 
     def test_failed_initialization_does_not_start_gateway(self):
-        result = self.invoke(("run",), TAK_GATEWAY_WEB_BIND="invalid",
-                             ENTRYPOINT_INIT_EXIT="7")
+        result = self.invoke(("run",), ENTRYPOINT_INIT_EXIT="7")
         self.assertEqual(result.returncode, 7)
         self.assertEqual(len(self.calls()), 1)
         self.assertEqual(self.calls()[0]["args"][0], "config")

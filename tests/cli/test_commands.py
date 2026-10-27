@@ -35,6 +35,12 @@ class Commands(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return tomllib.loads(result.stdout)
 
+    def test_run_on_a_fresh_store_requires_explicit_configuration(self):
+        result = self.command("run")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("No saved configuration", result.stderr)
+        self.assertFalse((self.state / "CURRENT").exists())
+
     def test_config_persists_and_later_edits_keep_unrelated_settings(self):
         self.config("--output", "local=udp://127.0.0.1:19000",
                     "--log-level", "debug")
