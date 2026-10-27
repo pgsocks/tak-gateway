@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM debian:bookworm-slim AS build
+FROM debian:trixie-slim AS build
 
 RUN --mount=type=secret,id=proxy_ca \
     bundle=/etc/ssl/certs/ca-certificates.crt; \
@@ -24,7 +24,7 @@ cmake --preset no-tests
 cmake --build --preset no-tests --parallel 2
 BUILD
 
-FROM debian:bookworm-slim AS runtime
+FROM debian:trixie-slim AS runtime
 RUN --mount=type=secret,id=proxy_ca \
     bundle=/etc/ssl/certs/ca-certificates.crt; \
     if [ -f /run/secrets/proxy_ca ]; then bundle=/run/secrets/proxy_ca; fi; \
